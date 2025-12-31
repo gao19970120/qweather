@@ -5385,20 +5385,15 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     const actualMinutes = minutelyForecast.length || 1;
     const positions = (() => {
       const { minTemp, maxTemp, range, allEqual } = extremes;
-      
-      // 增加上下边距，防止曲线超出Canvas范围
-      const PADDING_TOP = 20;
-      const PADDING_BOTTOM = 10;
-      const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX - PADDING_TOP - PADDING_BOTTOM;
-
+      const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX;
       if (allEqual || range === 0) {
-        const middlePosition = availableHeight / 2 + PADDING_TOP;
+        const middlePosition = availableHeight / 2;
         return minutelyForecast.map(() => middlePosition);
       }
       const unitPosition = availableHeight / range;
       return minutelyForecast.map(minute => {
         const tempVal = parseFloat(minute.native_temperature) || 0;
-        return (maxTemp - tempVal) * unitPosition + PADDING_TOP;
+        return (maxTemp - tempVal) * unitPosition;
       });
     })();
     
@@ -5407,12 +5402,13 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     // 叠加修正：dot + 2.5, button - 3
     const isDotMode = this.config?.visual_style === 'dot';
     const centerOffset = isDotMode 
-      ? (2.5 + 2.5) // dot: 5.0
-      : ((BUTTON_HEIGHT_PX / 1.7) - 3); // button: ~7.0
-      
+      ? (2.5 + 2.5)
+      : ((BUTTON_HEIGHT_PX / 1.7) - 3);
+    const DOT_SHIFT_PX = 5;
     const points = minutelyForecast.map((_, index) => {
       const x = (index * 100) / actualMinutes + (100 / actualMinutes) / 2;
-      const y = Math.max(0, Math.min(positions[index] + centerOffset, CONTAINER_HEIGHT_PX));
+      const extraShift = isDotMode ? DOT_SHIFT_PX : 0;
+      const y = Math.max(0, Math.min(positions[index] + centerOffset + extraShift, CONTAINER_HEIGHT_PX));
       return { x, y };
     });
     
@@ -5439,7 +5435,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
           
           const rainfall = parseFloat(minute.native_precipitation) || 0;
           
-          const pointY = points[index]?.y ?? (CONTAINER_HEIGHT_PX / 2 + centerOffset);
+          const pointY = points[index]?.y ?? (CONTAINER_HEIGHT_PX / 2 + centerOffset + (isDotMode ? DOT_SHIFT_PX : 0));
           
           const RAINFALL_MAX = 1; 
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
@@ -5522,21 +5518,19 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     
     const actualColumns = hourlyData.length;
     // 小时天气只有一个温度，使用实际可用高度计算
-    const PADDING_TOP = 20;
-    const PADDING_BOTTOM = 10;
-    const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX - PADDING_TOP - PADDING_BOTTOM;
+    const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX;
     
     // 计算每个小时的温度位置
     let positions;
     if (range === 0) {
       // 如果所有温度相等，将位置设置在中间
-      const middlePosition = availableHeight / 2 + PADDING_TOP;
+      const middlePosition = availableHeight / 2;
       positions = hourlyData.map(() => middlePosition);
     } else {
       const unitPosition = availableHeight / range;
       positions = hourlyData.map(hour => {
         const temp = parseFloat(hour.native_temperature) || 0;
-        return (maxTemp - temp) * unitPosition + PADDING_TOP;
+        return (maxTemp - temp) * unitPosition;
       });
     }
     
