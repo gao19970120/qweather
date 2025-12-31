@@ -1128,6 +1128,23 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return temp.toString().includes('.') ? temp : temp;
   }
 
+  _formatDateToBeijing(datetime) {
+    try {
+      const d = new Date(datetime);
+      const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(d);
+      const get = (t) => parts.find(p => p.type === t)?.value || '';
+      return `${get('year')}-${get('month')}-${get('day')}`;
+    } catch {
+      return datetime ? datetime.slice(0, 10) : '';
+    }
+  }
+
   _getCityIcon() {
     const icons = {
       '家': '🏠',
@@ -2521,8 +2538,8 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           const level = warningItem.level ?? "";
           const warningColor = this._getWarningColorForLevel(level);
           const sender = warningItem.sender ?? "";
-          const startTime = warningItem.startTime ? warningItem.startTime.slice(0, 10) : "";
-          const endTime = warningItem.endTime ? warningItem.endTime.slice(0, 10) : "";
+          const startTime = warningItem.startTime ? this._formatDateToBeijing(warningItem.startTime) : "";
+          const endTime = warningItem.endTime ? this._formatDateToBeijing(warningItem.endTime) : "";
           const text = warningItem.text ?? "";
           const scrollDuration = Math.max(5, text.length * 0.3);
 
@@ -6485,6 +6502,42 @@ class XiaoshiWarningWeatherCard extends LitElement {
     return this._getWarningColorForLevel(level);
   }
 
+  _formatDateTimeToBeijing(datetime) {
+    try {
+      const d = new Date(datetime);
+      const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).formatToParts(d);
+      const get = (t) => parts.find(p => p.type === t)?.value || '';
+      return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+    } catch {
+      return datetime ? datetime.slice(0, 16) : '';
+    }
+  }
+
+  _formatDateToBeijing(datetime) {
+    try {
+      const d = new Date(datetime);
+      const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(d);
+      const get = (t) => parts.find(p => p.type === t)?.value || '';
+      return `${get('year')}-${get('month')}-${get('day')}`;
+    } catch {
+      return datetime ? datetime.slice(0, 10) : '';
+    }
+  }
+
   _toggleWarningClose() {
     // 关闭小时天气弹窗
     if (window.browser_mod) {
@@ -6529,8 +6582,8 @@ class XiaoshiWarningWeatherCard extends LitElement {
           const typeName = warningItem.typeName ?? "";
           const level = warningItem.level ?? "";
           const sender = warningItem.sender ?? "";
-          const startTime = warningItem.startTime ? warningItem.startTime.slice(0, 16) : "";
-          const endTime = warningItem.endTime ? warningItem.endTime.slice(0, 16) : "";
+          const startTime = warningItem.startTime ? this._formatDateTimeToBeijing(warningItem.startTime) : "";
+          const endTime = warningItem.endTime ? this._formatDateTimeToBeijing(warningItem.endTime) : "";
           const text = warningItem.text ?? "";
           
           // 获取当前预警项的颜色
