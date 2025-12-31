@@ -1297,17 +1297,20 @@ class WeatherData(object):
                     cloud = hourly_data.cloud_coverage
                     wind_scale = hourly_data.windscaleday
 
-                # 降水类型转换
+                # 降水类型转换与零降水继承逻辑（兼容字符串/数字形式的0）
+                def _is_zero_precip(val):
+                    try:
+                        v = float(str(val).strip())
+                        return abs(v) < 1e-9
+                    except (ValueError, TypeError):
+                        s = str(val).strip()
+                        return s in ("0", "0.0", "0.00", "0.000")
+                raw_precip = minutely.get("precip", 0)
                 precip_type = minutely.get("type", "")
-                precip_val = float(minutely.get("precip", 0))
-                if precip_type == "rain":
-                    condition = "rainy"
-                    text = "雨"
-                elif precip_type == "snow":
-                    condition = "snowy"
-                    text = "雪"
-                elif precip_val == 0:
-                    # 当分钟降雨量为0，继承小时的 condition 和 text
+                is_zero = _is_zero_precip(raw_precip)
+
+                if is_zero:
+                    # 当分钟降雨量为0，优先继承对应小时的 condition/text
                     if match_key and match_key in hourly_dict:
                         condition = hourly_dict[match_key].condition
                         text = hourly_dict[match_key].text
@@ -1315,6 +1318,13 @@ class WeatherData(object):
                         # 兜底：使用当前天气描述
                         condition = CONDITION_MAP.get(self._icon, EXCEPTIONAL) if hasattr(self, '_icon') else None
                         text = getattr(self, '_condition_cn', None)
+                else:
+                    if precip_type == "rain":
+                        condition = "rainy"
+                        text = "雨"
+                    elif precip_type == "snow":
+                        condition = "snowy"
+                        text = "雪"
 
                 self._minutely_forecast.append(MinutelyForecast(
                     datetime=time_str,
@@ -1323,9 +1333,9 @@ class WeatherData(object):
                     text=text,
                     wind_bearing=wind_bearing,
                     native_wind_speed=wind_speed,
-                    native_precipitation=float(minutely.get("precip", 0)),
+                    native_precipitation=float(str(minutely.get("precip", 0)).strip() or 0),
                     humidity=humidity,
-                    probable_precipitation=float(minutely.get("precip", 0)),
+                    probable_precipitation=float(str(minutely.get("precip", 0)).strip() or 0),
                     native_pressure=pressure,
                     cloud_coverage=cloud,
                     windscaleday=wind_scale

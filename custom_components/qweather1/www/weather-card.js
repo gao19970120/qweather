@@ -1,4 +1,4 @@
-console.info("%c 天气卡片 \n%c   v 3.8   ", "color: red; font-weight: bold; background: black", "color: white; font-weight: bold; background: black");
+console.info("%c 天气卡片 \n%c   v 4.4   ", "color: red; font-weight: bold; background: black", "color: white; font-weight: bold; background: black");
 import { LitElement, html, css } from "https://unpkg.com/lit-element@2.4.0/lit-element.js?module";
 
 class XiaoshiWeatherPhoneEditor extends LitElement {
@@ -1148,7 +1148,9 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     // 根据日期差返回相应的文本
-    if (diffDays === -1) {
+    if (diffDays === -2) {
+      return '前天';
+    } else if (diffDays === -1) {
       return '昨天';
     } else if (diffDays === 0) {
       return '今天';
@@ -1750,19 +1752,19 @@ class XiaoshiWeatherPhoneCard extends LitElement {
   } 
 
   render() {
-    if (this.mode !== "搜索城市" && (!this.entity || this.entity.state === 'unavailable')) {
+    if (this.mode !== "搜索城市" && (!this.entity || this.entity.state === '无搜索城市' || this.entity.state === 'unavailable')) {
       return html`<div class="unavailable"> </div>`;
     }
 
-    else if (this.mode !== "搜索城市" && (this.entity || this.entity.state !== 'unavailable')) {
+    else if (this.mode !== "搜索城市" && (this.entity || this.entity.state !== 'unavailable' || this.entity.state !== '无搜索城市')) {
       return this._rendermain();
     }
 
-    else if (this.mode === "搜索城市" && (!this.entity || this.entity.state === 'unavailable')) {
+    else if (this.mode === "搜索城市" && (!this.entity || this.entity.state === 'unavailable' || this.entity.state === '无搜索城市')) {
       return  html`${this._renderInput()}`;
     }
 
-    else if (this.mode === "搜索城市" && (this.entity || this.entity.state !== 'unavailable')) {
+    else if (this.mode === "搜索城市" && (this.entity || this.entity.state !== 'unavailable' || this.entity.state !== '无搜索城市')) {
       return html`${this._rendermain()} <div class="input-gap"> </div> ${this._renderInput()}`;
     }
   }
@@ -1934,7 +1936,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           const lowTemp = this._formatTemperature(day.native_temp_low);
           
           // 如果是昨天，设置透明度 
-          const isYesterday = weekday !== '昨天';
+          const isYesterday = weekday !== '昨天' && weekday !== '前天';
           const opacity = isYesterday ? 1 : 0.5;
           const theme = this._evaluateTheme();
 
@@ -1961,7 +1963,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           // 计算雨量矩形高度和位置
           
           const {CONTAINER_HEIGHT_VW } = XiaoshiWeatherPhoneCard.TEMPERATURE_CONSTANTS;
-          const RAINFALL_MAX = 20; // 最大雨量20mm
+          const RAINFALL_MAX = 25; // 最大雨量25mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * CONTAINER_HEIGHT_VW+4, CONTAINER_HEIGHT_VW+4); // 最大高度21.6vw（到日期下面）
 
           return html`
@@ -1994,7 +1996,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
@@ -2084,7 +2086,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
             }
             
             // 计算雨量矩形高度和位置
-            const RAINFALL_MAX = 2; // 最大雨量20mm
+            const RAINFALL_MAX = 5; // 最大雨量5mm
             const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * CONTAINER_HEIGHT_VW+4, CONTAINER_HEIGHT_VW+4); // 最大高度21.6vw（到日期下面）
 
 
@@ -2112,7 +2114,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                   
                   <!-- 雨量填充矩形 -->
                   ${rainfall > 0 ? html`
-                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${rainfall / RAINFALL_MAX}"></div>
+                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                   ` : ''}
                 </div>
                 <div class="forecast-temp-null"></div>
@@ -2200,7 +2202,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
             }
             
             // 计算雨量矩形高度和位置
-            const RAINFALL_MAX = 0.2; // 最大雨量2mm
+            const RAINFALL_MAX = 1; // 最大雨量1mm
             const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * CONTAINER_HEIGHT_VW+4, CONTAINER_HEIGHT_VW+4); // 最大高度21.6vw（到日期下面）
 
 
@@ -2228,7 +2230,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                   
                   <!-- 雨量填充矩形 -->
                   ${rainfall > 0 ? html`
-                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${rainfall / RAINFALL_MAX}"></div>
+                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                   ` : ''}
                 </div>
                 <div class="forecast-temp-null"></div>
@@ -2266,7 +2268,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
         // 如果是昨天，设置透明度 
         const date = new Date(day.datetime);
         const weekday = this._getWeekday(date);
-        const isYesterday = weekday !== '昨天';
+        const isYesterday = weekday !== '昨天' && weekday !== '前天';
         const opacity = isYesterday ? 1 : 0.5;
 
         return html`
@@ -2319,7 +2321,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
         // 如果是昨天，设置透明度 
         const date = new Date(day.datetime);
         const weekday = this._getWeekday(date);
-        const isYesterday = weekday !== '昨天';
+        const isYesterday = weekday !== '昨天' && weekday !== '前天';
         const opacity = isYesterday ? 1 : 0.5;
 
         // 如果风速是 "4-5" 格式，取最大值
@@ -3079,9 +3081,11 @@ class XiaoshiWeatherPadCard extends LitElement {
 
       /*天气头部 图标*/
       .weather-icon {
-        width: 50px;
+        width: 45px;
+        min-width: 45px;
+        max-width: 45px;
         height: 50px;
-        margin-right: 16px;
+        margin-right: 7px;
         margin-bottom: 0px;
       }
 
@@ -3597,7 +3601,9 @@ class XiaoshiWeatherPadCard extends LitElement {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     // 根据日期差返回相应的文本
-    if (diffDays === -1) {
+    if (diffDays === -2) {
+      return '前天';
+    } else if (diffDays === -1) {
       return '昨天';
     } else if (diffDays === 0) {
       return '今天';
@@ -3854,7 +3860,7 @@ class XiaoshiWeatherPadCard extends LitElement {
     
     return html`
             <button class="toggle-btn-aqi" style="color: ${color};" @click="${() => this._toggleApiInfo()}">
-              ${category}
+              ${category.slice(0,2)}
             </button>
             ` 
   }
@@ -4161,7 +4167,7 @@ class XiaoshiWeatherPadCard extends LitElement {
           const lowTemp = this._formatTemperature(day.native_temp_low);
 
           // 如果是昨天，设置透明度 
-          const isYesterday = weekday !== '昨天';
+          const isYesterday = weekday !== '昨天' && weekday !== '前天';
           const opacity = isYesterday ? 1 : 0.5;
           const theme = this._evaluateTheme();
           const hightbackground = isYesterday ? 
@@ -4187,7 +4193,7 @@ class XiaoshiWeatherPadCard extends LitElement {
           const rainfall = parseFloat(day.native_precipitation) || 0;
           
           // 计算雨量矩形高度和位置
-          const RAINFALL_MAX = 20; // 最大雨量20mm
+          const RAINFALL_MAX = 25; // 最大雨量25mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125); // 最大高度125px（到日期下面）
 
           return html`
@@ -4220,7 +4226,7 @@ class XiaoshiWeatherPadCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
@@ -4252,7 +4258,7 @@ class XiaoshiWeatherPadCard extends LitElement {
   }
 
   render() {
-    if (!this.entity || this.entity.state === 'unavailable') {
+    if (!this.entity || this.entity.state === 'unavailable' || this.entity.state === '无搜索城市') {
       return html`<div class="unavailable"></div>`;
     }
     // 获取自定义或默认的温度和湿度
@@ -4424,7 +4430,7 @@ class XiaoshiWeatherPadCard extends LitElement {
         // 如果是昨天，设置透明度 
         const date = new Date(day.datetime);
         const weekday = this._getWeekday(date);
-        const isYesterday = weekday !== '昨天';
+        const isYesterday = weekday !== '昨天' && weekday !== '前天';
         const opacity = isYesterday ? 1 : 0.5;
         return html`
           <div class="forecast-icon-container" style="opacity: ${opacity}>
@@ -4450,7 +4456,7 @@ class XiaoshiWeatherPadCard extends LitElement {
         // 如果是昨天，设置透明度 
         const date = new Date(day.datetime);
         const weekday = this._getWeekday(date);
-        const isYesterday = weekday !== '昨天';
+        const isYesterday = weekday !== '昨天' && weekday !== '前天';
         const opacity = isYesterday ? 1 : 0.5;
         // 如果风速是 "4-5" 格式，取最大值
         if (typeof windSpeedRaw === 'string' && windSpeedRaw.includes('-')) {
@@ -5577,7 +5583,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
           }
           
           // 计算雨量矩形高度和位置
-          const RAINFALL_MAX = 2; // 最大雨量20mm
+          const RAINFALL_MAX = 5; // 最大雨量5mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
 
           return html`
@@ -5604,7 +5610,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
@@ -5698,7 +5704,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
           }
           
           // 计算雨量矩形高度和位置
-          const RAINFALL_MAX = 2; // 最大雨量20mm
+          const RAINFALL_MAX = 1; // 最大雨量1mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
 
           return html`
@@ -5725,7 +5731,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3 + rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>

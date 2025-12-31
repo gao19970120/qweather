@@ -87,15 +87,23 @@ from .const import (
     ATTR_DAILY_FORECAST,
     ATTR_HOURLY_FORECAST,
     ATTR_MINUTELY_FORECAST,
+    ATTR_MINUTELY_SUMMARY,
     ATTR_FORECAST_PROBABLE_PRECIPITATION,
     CONDITION_CLASSES,
-    )
+)
     
 from .condition import CONDITION_MAP, EXCEPTIONAL
 _LOGGER = logging.getLogger(__name__)
 # 设置日志级别为DEBUG，确保所有调试日志都能显示
 _LOGGER.setLevel(logging.DEBUG)
 DEFAULT_TIME = dt_util.now()
+
+def create_no_city_entity(config_entry):
+    """创建无搜索城市实体"""
+    name = config_entry.data.get(CONF_NAME)
+    unique_id = config_entry.unique_id
+    return NoCityWeather(unique_id, name)
+
 # 集成安装
 async def async_setup_entry(hass, config_entry, async_add_entities):
     
@@ -119,6 +127,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         # 搜索城市模式
         city = config_entry.data.get("城市搜索")
         if not city:
+            _LOGGER.debug(f"城市搜索为空，跳过")
+            # 创建无搜索城市实体
+            no_city_entity = create_no_city_entity(config_entry)
+            async_add_entities([no_city_entity], True)
             return
         
         # 调用接口获取经纬度
@@ -208,15 +220,70 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         # 正常更新数据
         await data.async_update(now)
     
-    # 注册定时更新
-    async_track_time_interval(hass, custom_update, timedelta(minutes=update_interval_minutes))
+    # 注册定时更新并保存回调对象，以便卸载时取消
+    update_listener = async_track_time_interval(hass, custom_update, timedelta(minutes=update_interval_minutes))
     _LOGGER.debug('[%s]刷新间隔时间: %s 分钟，夜间不更新: %s', name, update_interval_minutes, no_update_at_night)
+    
+    # 保存定时任务回调到hass.data，供卸载时使用
+    hass.data[DOMAIN][unique_id]['update_listener'] = update_listener
     
     if data._current:  # 检查是否有有效数据
         async_add_entities([HeFengWeather(data, unique_id, name)], True)
         _LOGGER.info(f"成功添加天气实体: {name}")
     else:
         _LOGGER.error("未能获取有效天气数据，无法创建实体")
+
+class NoCityWeather(WeatherEntity):
+    """无搜索城市实体，显示固定状态"""
+    def __init__(self, unique_id, name):
+        """Initialize the no city weather entity."""
+        self._name = name
+        self._unique_id = unique_id
+        self._attr_native_temperature = None
+        self._attr_condition = None
+        self._attr_humidity = None
+        self._attr_native_pressure = None
+        self._attr_native_wind_speed = None
+        self._attr_wind_bearing = None
+        self._attr_native_precipitation_unit = UnitOfLength.MILLIMETERS
+        self._attr_native_pressure_unit = UnitOfPressure.HPA
+        self._attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+        self._attr_native_visibility_unit = UnitOfLength.KILOMETERS
+        self._attr_native_wind_speed_unit = UnitOfSpeed.KILOMETERS_PER_HOUR
+        self._attr_supported_features = 0
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return a unique_id for this entity."""
+        if self._unique_id:
+            return f"{DOMAIN}_{self._unique_id}"
+        return f"{DOMAIN}_{self._name}"
+
+    @property
+    def device_info(self):
+        """Return the device info."""
+        from homeassistant.helpers.device_registry import DeviceEntryType
+        return {
+            "identifiers": {(DOMAIN, self._unique_id)},
+            "name": self.name,
+            "manufacturer": MANUFACTURER,
+            "model": "和风天气API",
+            "sw_version": VERSION
+        }
+
+    @property
+    def state(self):
+        """Return the state of the entity."""
+        return "无搜索城市"
+
+    async def async_update(self):
+        """Update the entity - no-op for this entity."""
+        pass
 
 class HeFengWeather(WeatherEntity):
     """Representation of a weather condition."""
@@ -245,6 +312,7 @@ class HeFengWeather(WeatherEntity):
         self._hourly_forecast = None
         self._daily_twice_forecast = None
         self._minutely_forecast = None
+        self._minutely_summary = None
         self._feelslike = None
         self._cloud = None
         self._vis = None
@@ -417,6 +485,7 @@ class HeFengWeather(WeatherEntity):
                 "dew_point": self._dew,
                 "feelslike": self._feelslike,
                 ATTR_UPDATE_TIME: self._updatetime,
+                ATTR_MINUTELY_SUMMARY: self._minutely_summary,
                 "aqis": self._aqi.get("aqi") if isinstance(self._aqi, dict) else None,
                 ATTR_AQI: self._aqi,
                 ATTR_DAILY_FORECAST: daily_forecast,
@@ -429,6 +498,7 @@ class HeFengWeather(WeatherEntity):
                 },
                 "warning": weather_warning,
             })
+
         return attributes
         
         # 设置定时更新
@@ -462,6 +532,7 @@ class HeFengWeather(WeatherEntity):
             self._hourly_forecast = self._data._hourly_forecast
             self._daily_twice_forecast = self._data._daily_twice_forecast
             self._minutely_forecast = self._data._minutely_forecast
+            self._minutely_summary = self._data._minutely_summary
             self._aqi = self._data._aqi
             self._winddir = self._data._winddir
             self._windscale = self._data._windscale
@@ -558,7 +629,9 @@ class WeatherData(object):
         self._updatetime = None
         self._daily_forecast = None
         self._hourly_forecast = None
-        self._aqi = None 
+        self._minutely_forecast = None
+        self._minutely_summary = None
+        self._aqi = None
         self._winddir = None
         self._windscale = None
         self._weather_warning = None
@@ -963,7 +1036,7 @@ class WeatherData(object):
                 tasks.append(fetch_data(self.hourly_url, '_updatetime_hourly', '_hourly_data', min_intervals['hourly'], 'hourly', force_update))
             if self._enable_minutely:
                 _LOGGER.debug(f"添加分钟预警API任务: {self.minutely_url}")
-                tasks.append(fetch_data(self.minutely_url, '_updatetime_minutely', '_minutely_data', min_intervals['hourly'], None, force_update))
+                tasks.append(fetch_data(self.minutely_url, '_updatetime_minutely', '_minutely_data', min_intervals['minutely'], None, force_update))
             if self._enable_warning:
                 _LOGGER.debug(f"添加预警API任务: {self.warning_url}")
                 tasks.append(fetch_data(self.warning_url, '_updatetime_warning', '_warning_data', min_intervals['warning'], None, force_update))
@@ -1229,8 +1302,13 @@ class WeatherData(object):
 
         # 处理分钟预报
         self._minutely_forecast = []
+        self._minutely_summary = None
 
         if self._minutely_data:
+            # 提取summary字段
+            if isinstance(self._minutely_data, dict):
+                self._minutely_summary = self._minutely_data.get('summary')
+
             minutely_list = []
             if isinstance(self._minutely_data, dict) and 'minutely' in self._minutely_data:
                 minutely_list = self._minutely_data['minutely']
@@ -1291,15 +1369,30 @@ class WeatherData(object):
                     pressure = hourly_data.native_pressure
                     cloud = hourly_data.cloud_coverage
                     wind_scale = hourly_data.windscaleday
-
+ 
                 # 降水类型转换
                 precip_type = minutely.get("type", "")
-                if precip_type == "rain":
-                    condition = "rainy"
-                    text = "雨"
-                elif precip_type == "snow":
-                    condition = "snowy"
-                    text = "雪"
+                precip_value = float(minutely.get("precip", 0))
+
+                # 当分钟降水为0时，继承小时天气或实时天气数据
+                if precip_value == 0:
+                    if match_key and match_key in hourly_dict:
+                        # 优先继承小时天气数据
+                        hourly_data = hourly_dict[match_key]
+                        condition = hourly_data.condition
+                        text = hourly_data.text
+                    else:
+                        # 没有匹配的小时数据，使用实时天气数据
+                        condition = self._condition
+                        text = self._condition_cn
+                else:
+                    # 有降水时，根据降水类型设置
+                    if precip_type == "rain":
+                        condition = "rainy"
+                        text = "雨"
+                    elif precip_type == "snow":
+                        condition = "snowy"
+                        text = "雪"
 
                 self._minutely_forecast.append(MinutelyForecast(
                     datetime=time_str,
