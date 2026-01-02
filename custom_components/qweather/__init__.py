@@ -36,7 +36,7 @@ async def async_setup_weather_card(hass: HomeAssistant) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(state_weather_card_path, hass.config.path('custom_components/qweather/www'), False)
     ])
-    add_extra_js_url(hass, state_weather_card_path + f"/weather-card.js")
+    add_extra_js_url(hass, state_weather_card_path + f"/weather-card.js?v=4.8.10")
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -48,6 +48,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """卸载QWeather配置项。"""
+    # 清理定时任务
+    unique_id = entry.unique_id
+    if DOMAIN in hass.data and unique_id in hass.data[DOMAIN]:
+        # 取消定时更新任务
+        update_listener = hass.data[DOMAIN][unique_id].get('update_listener')
+        if update_listener:
+            update_listener()
+            _LOGGER.info(f"已取消定时更新任务: {unique_id}")
+        
+        # 清理hass.data中的数据
+        del hass.data[DOMAIN][unique_id]
+        _LOGGER.info(f"已清理hass.data中的数据: {unique_id}")
         
         # 如果DOMAIN下没有其他条目，清理整个DOMAIN
         if not hass.data[DOMAIN]:

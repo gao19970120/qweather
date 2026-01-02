@@ -1123,6 +1123,27 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return iconMap[condition] || (isDark ? `${iconPath}/${condition}-暗黑.svg` : `${iconPath}/${condition}.svg`);
   }
 
+  _getWarningColorForLevel(level) {
+    if (level == "红色") return "rgb(255,50,50)";
+    if (level == "橙色") return "rgb(255,100,0)";
+    if (level == "黄色") return "rgb(255,200,0)";
+    if (level == "蓝色") return "rgb(50,150,200)";
+    return "#FFA726";
+  }
+
+  _getWarningColor(warning) {
+    if (!warning || warning.length === 0) return "#FFA726";
+    let level = "";
+    const priority = ["红色", "橙色", "黄色", "蓝色"];
+    for (let i = 0; i < warning.length; i++) {
+      const currentLevel = warning[i].level;
+      if (priority.indexOf(currentLevel) < priority.indexOf(level) || level == "") {
+        level = currentLevel;
+      }
+    }
+    return this._getWarningColorForLevel(level);
+  }
+
   _formatTemperature(temp) {
     if (temp === undefined || temp === null) return '--';
     return temp.toString().includes('.') ? temp : temp;
@@ -1207,6 +1228,23 @@ class XiaoshiWeatherPhoneCard extends LitElement {
   _getMinutelyForecast() {
     if (!this.entity?.attributes?.minutely_forecast) return [];
     return this.entity.attributes.minutely_forecast.slice(0, 24);
+  }
+
+  _getMinutelyTemperatureExtremes() {
+    let temperatures = [];
+    const minutelyForecast = this._getMinutelyForecast();
+    if (minutelyForecast.length === 0) {
+      return { minTemp: 0, maxTemp: 0, range: 0, allEqual: true };
+    }
+    temperatures = minutelyForecast.map(item => parseFloat(item.native_temperature) || 0);
+
+    const minTemp = Math.min(...temperatures);
+    const maxTemp = Math.max(...temperatures);
+    const range = maxTemp - minTemp;
+    
+    const allEqual = temperatures.every(temp => temp === temperatures[0]);
+    
+    return { minTemp, maxTemp, range, allEqual };
   }
 
   _toggleForecastMode() {
@@ -1579,7 +1617,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return Math.random().toString(36).substr(2, 9);
   }
 
-  _drawTemperatureCurve(canvasId, points, color) {
+  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo = null) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -1609,15 +1647,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
       // 清除画布
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // 设置线条样式
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 6; // 固定线宽
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      // 开始绘制路径
-      ctx.beginPath();
-      
       const { CONTAINER_HEIGHT_VW } = XiaoshiWeatherPhoneCard.TEMPERATURE_CONSTANTS;
       
       // 转换所有点为Canvas坐标
@@ -1633,50 +1662,168 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           ctx.beginPath();
           ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
           ctx.lineTo(canvasPoints[1].x, canvasPoints[1].y);
+          
+          // 应用虚线样式（如果有）
+          if (dashedSegmentInfo && dashedSegmentInfo.endIndex >= 0) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 0.6;
+            ctx.setLineDash([8, 8]);
+          } else {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.globalAlpha = 1;
+            ctx.setLineDash([]);
+          }
           ctx.stroke();
         }
         return;
       }
       
-      // 开始绘制平滑曲线，确保通过所有原始点
-      ctx.beginPath();
-      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-      
       // 使用更保守的样条算法，减少曲线过度弯曲
       const tension = 0.2; // 减小张力系数，避免过度弯曲
       
-      for (let i = 0; i < canvasPoints.length - 1; i++) {
-        const p0 = canvasPoints[Math.max(0, i - 1)];
-        const p1 = canvasPoints[i];
-        const p2 = canvasPoints[i + 1];
-        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+      // 判断是否需要分两段绘制
+      if (dashedSegmentInfo && dashedSegmentInfo.endIndex >= 0 && dashedSegmentInfo.endIndex < canvasPoints.length - 1) {
+        // 第一段：虚线，0.6透明度（前天、昨天、今天的左半部分）
+        const dashedEndIndex = Math.min(dashedSegmentInfo.endIndex, canvasPoints.length - 2);
+        // 分割点位于"今天"的中心位置
+        const splitX = canvasPoints[dashedEndIndex].x;
         
-        // 计算控制点，限制控制点距离，避免过度弯曲
-        const dx1 = (p2.x - p0.x) * tension;
-        const dy1 = (p2.y - p0.y) * tension;
-        const dx2 = (p3.x - p1.x) * tension;
-        const dy2 = (p3.y - p1.y) * tension;
+        // 绘制第一段（虚线）
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.6;
+        ctx.setLineDash([6, 12]);
+        ctx.beginPath();
         
-        // 限制控制点的垂直距离，防止曲线超出边界
-        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-        
-        const cp1x = p1.x + dx1;
-        const cp1y = p1.y + limitedDy1;
-        const cp2x = p2.x - dx2;
-        const cp2y = p2.y - limitedDy2;
-        
-        // 如果是第一段，使用二次贝塞尔
-        if (i === 0) {
-          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
-        } else {
-          // 使用三次贝塞尔曲线，确保通过原始点
-          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+        for (let i = 0; i <= dashedEndIndex; i++) {
+          const p0 = canvasPoints[Math.max(0, i - 1)];
+          const p1 = canvasPoints[i];
+          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
+          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+          
+          const dx1 = (p2.x - p0.x) * tension;
+          const dy1 = (p2.y - p0.y) * tension;
+          const dx2 = (p3.x - p1.x) * tension;
+          const dy2 = (p3.y - p1.y) * tension;
+          
+          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+          
+          const cp1x = p1.x + dx1;
+          const cp1y = p1.y + limitedDy1;
+          const cp2x = p2.x - dx2;
+          const cp2y = p2.y - limitedDy2;
+          
+          // 计算曲线终点，需要在splitX处截断
+          const isLastSegment = i === dashedEndIndex;
+          
+          if (i === 0) {
+            ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+          }
+          
+          if (isLastSegment) {
+            // 最后一段画到"今天"中心点，使用更长的虚线段以保持虚线效果
+            ctx.lineTo(splitX, p1.y);
+          } else {
+            if (i === 0) {
+              ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+            } else {
+              ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+            }
+          }
         }
+        ctx.stroke();
+        
+        // 绘制第二段（实线，正常透明度）
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        
+        // 从"今天"中心点开始绘制第二段
+        for (let i = dashedEndIndex; i < canvasPoints.length - 1; i++) {
+          const p0 = canvasPoints[Math.max(0, i - 1)];
+          const p1 = canvasPoints[i];
+          const p2 = canvasPoints[i + 1];
+          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+          
+          const dx1 = (p2.x - p0.x) * tension;
+          const dy1 = (p2.y - p0.y) * tension;
+          const dx2 = (p3.x - p1.x) * tension;
+          const dy2 = (p3.y - p1.y) * tension;
+          
+          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+          
+          const cp1x = p1.x + dx1;
+          const cp1y = p1.y + limitedDy1;
+          const cp2x = p2.x - dx2;
+          const cp2y = p2.y - limitedDy2;
+          
+          // 如果是第一段（接续点），起点为splitX
+          if (i === dashedEndIndex) {
+            ctx.moveTo(splitX, p1.y);
+             ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          } else {
+             ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          }
+        }
+        ctx.stroke();
+        
+      } else {
+        // 正常绘制（全部实线）
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        
+        ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+        
+        for (let i = 0; i < canvasPoints.length - 1; i++) {
+          const p0 = canvasPoints[Math.max(0, i - 1)];
+          const p1 = canvasPoints[i];
+          const p2 = canvasPoints[i + 1];
+          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+          
+          const dx1 = (p2.x - p0.x) * tension;
+          const dy1 = (p2.y - p0.y) * tension;
+          const dx2 = (p3.x - p1.x) * tension;
+          const dy2 = (p3.y - p1.y) * tension;
+          
+          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+          
+          const cp1x = p1.x + dx1;
+          const cp1y = p1.y + limitedDy1;
+          const cp2x = p2.x - dx2;
+          const cp2y = p2.y - limitedDy2;
+          
+          if (i === 0) {
+            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+          } else {
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          }
+        }
+        
+        ctx.stroke();
       }
-      
-      ctx.stroke();
     });
   }
 
@@ -1874,6 +2021,27 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const enableHourlyForecast = this.entity.attributes?.hourly_forecast && this.entity.attributes?.hourly_forecast.length > 0;
     const sunRise = this.entity.attributes?.sun.sunrise || '';
     const sunSet = this.entity.attributes?.sun.sunset || '';
+    
+    // 获取额外属性
+    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
+    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
+    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
+    const windDir = this.entity.attributes?.winddir || '';
+    
+    // 获取UV指数
+    let uv = 0;
+    if (this.entity.attributes?.air_indices) {
+        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
+        if (uvIndex) {
+            uv = uvIndex.level || uvIndex.category || 0;
+        }
+    }
+    
+    // 获取AQI等级
+    let aqiCategory = '未知';
+    if (this.entity.attributes?.aqi) {
+        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
+    }
 
     // 获取颜色
     const fgColor = theme === 'on' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)';
@@ -1899,10 +2067,11 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                     html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
                 </div>
                 <div class="weather-info">
-                    <span style="color: ${secondaryColor};">${condition}  
-                      ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
-                      ${pressure}<span style="font-size: 0.6em;">hPa </span>
-                      ${visibility}<span style="font-size: 0.6em;">km </span>
+                    <span style="color: ${secondaryColor}; font-size: 3vw;">
+                        ${condition}  
+                        ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
+                        ${pressure}<span style="font-size: 0.6em;">hPa </span>
+                        ${visibility}<span style="font-size: 0.6em;">km </span>
                     </span>
                     ${this._getAqiCategoryHtml()}
                 </div>
@@ -1988,6 +2157,16 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const highTempData = this._generateTemperatureLine(forecastDays, extremes, true);
     const lowTempData = this._generateTemperatureLine(forecastDays, extremes, false);
     
+    // 检查是否需要虚线（如果有昨天的数据，则第一段为虚线）
+    let dashedSegmentInfo = null;
+    if (forecastDays.length > 0) {
+        const firstDay = forecastDays[0];
+        const weekday = this._getWeekday(firstDay.datetime);
+        if (weekday === '昨天') {
+            dashedSegmentInfo = { endIndex: 1 };
+        }
+    }
+    
     // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const highCanvasId = `high-temp-canvas-${instanceId}`;
@@ -1996,8 +2175,8 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
-        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)');
-        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)');
+        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)', dashedSegmentInfo);
+        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)', dashedSegmentInfo);
       }, 50);
     });
     
@@ -2025,7 +2204,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           
           // 如果是昨天，设置透明度 
           const isYesterday = weekday !== '昨天' && weekday !== '前天';
-          const opacity = isYesterday ? 1 : 0.5;
+          const opacity = isYesterday ? 1 : 0.3;
           const theme = this._evaluateTheme();
 
           const hightbackground = isYesterday ? 
@@ -2122,6 +2301,39 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const secondaryColor = theme === 'on' ? 'rgb(60, 140, 190)' : 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
+    // 获取实时天气数据
+    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
+    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
+    const condition = this.entity.attributes?.condition_cn || '未知';
+    const windSpeed = this.entity.attributes?.wind_speed || 0;
+    const windBearing = this.entity.attributes?.wind_bearing || 0;
+    const pressure = this.entity.attributes?.pressure || 0;
+    const visibility = this.entity.attributes?.visibility || 0;
+    const warning = this.entity.attributes?.warning || [];
+    const warningColor = this._getWarningColor(warning);
+    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
+    
+    // 获取额外属性
+    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
+    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
+    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
+    const windDir = this.entity.attributes?.winddir || '';
+    
+    // 获取UV指数
+    let uv = 0;
+    if (this.entity.attributes?.air_indices) {
+        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
+        if (uvIndex) {
+            uv = uvIndex.level || uvIndex.category || 0;
+        }
+    }
+    
+    // 获取AQI等级
+    let aqiCategory = '未知';
+    if (this.entity.attributes?.aqi) {
+        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
+    }
+    
     // 生成温度曲线坐标（小时天气只有一个温度）
     const tempData = this._generateTemperatureLine(hourlyForecast, extremes, true);
     
@@ -2145,6 +2357,28 @@ class XiaoshiWeatherPhoneCard extends LitElement {
      
     return html`
       <div class="hourly-forecast-scroll-container">
+        <!-- 详细天气信息显示区域 -->
+        <div style="padding: 2vw; margin-bottom: 2vw; text-align: left;">
+            <div class="weather-temperature" style="height: auto; font-size: 5vw; margin-bottom: 1vw;">
+              ${temperature}<font size="1vw"><b> ℃（天气温度）&ensp;</b></font>
+              ${feelsLike}<font size="1vw"><b> ℃（体感温度）&ensp;</b></font>
+              ${humidity}<font size="1vw"><b> %（天气湿度）</b></font>
+              ${hasWarning ? 
+                html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
+            </div>
+            <div class="weather-info" style="height: auto; font-size: 3vw; margin-top: 0; white-space: normal;">
+                <span style="color: ${secondaryColor};">
+                  ${condition}&ensp;
+                  气压:${pressure}hPa&ensp;
+                  云量:${cloud}%&ensp;
+                  风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;
+                  能见度:${visibility}km&ensp;
+                  紫外线:${uv}级&ensp;
+                  空气质量: ${aqiCategory}
+                </span>
+            </div>
+        </div>
+        
         <div class="hourly-forecast-container" style="grid-template-columns: repeat(${columns}, ${columnWidth}vw);">
           <!-- 小时温度连接线 Canvas -->
           <canvas class="temp-line-canvas temp-line-canvas-high" id="hourly-temp-canvas-${this._getInstanceId()}"></canvas>
@@ -2241,6 +2475,39 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const secondaryColor = theme === 'on' ? 'rgb(60, 140, 190)' : 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
+    // 获取实时天气数据
+    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
+    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
+    const condition = this.entity.attributes?.condition_cn || '未知';
+    const windSpeed = this.entity.attributes?.wind_speed || 0;
+    const windBearing = this.entity.attributes?.wind_bearing || 0;
+    const pressure = this.entity.attributes?.pressure || 0;
+    const visibility = this.entity.attributes?.visibility || 0;
+    const warning = this.entity.attributes?.warning || [];
+    const warningColor = this._getWarningColor(warning);
+    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
+    
+    // 获取额外属性
+    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
+    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
+    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
+    const windDir = this.entity.attributes?.winddir || '';
+    
+    // 获取UV指数
+    let uv = 0;
+    if (this.entity.attributes?.air_indices) {
+        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
+        if (uvIndex) {
+            uv = uvIndex.level || uvIndex.category || 0;
+        }
+    }
+    
+    // 获取AQI等级
+    let aqiCategory = '未知';
+    if (this.entity.attributes?.aqi) {
+        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
+    }
+    
     // 生成温度曲线坐标（分钟天气只有一个温度）
     const tempData = this._generateTemperatureLine(minutelyForecast, extremes, true);
     
@@ -2261,6 +2528,28 @@ class XiaoshiWeatherPhoneCard extends LitElement {
      
     return html`
       <div class="hourly-forecast-scroll-container">
+        <!-- 详细天气信息显示区域 -->
+        <div style="padding: 2vw; margin-bottom: 2vw; text-align: left;">
+            <div class="weather-temperature" style="height: auto; font-size: 5vw; margin-bottom: 1vw;">
+              ${temperature}<font size="1vw"><b> ℃（天气温度）&ensp;</b></font>
+              ${feelsLike}<font size="1vw"><b> ℃（体感温度）&ensp;</b></font>
+              ${humidity}<font size="1vw"><b> %（天气湿度）</b></font>
+              ${hasWarning ? 
+                html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
+            </div>
+            <div class="weather-info" style="height: auto; font-size: 3vw; margin-top: 0; white-space: normal;">
+                <span style="color: ${secondaryColor};">
+                  ${condition}&ensp;
+                  气压:${pressure}hPa&ensp;
+                  云量:${cloud}%&ensp;
+                  风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;
+                  能见度:${visibility}km&ensp;
+                  紫外线:${uv}级&ensp;
+                  空气质量: ${aqiCategory}
+                </span>
+            </div>
+        </div>
+        
         <div class="hourly-forecast-container" style="grid-template-columns: repeat(${columns}, ${columnWidth}vw);">
           <!-- 分钟温度连接线 Canvas -->
           <canvas class="temp-line-canvas temp-line-canvas-high" id="minutely-temp-canvas-${this._getInstanceId()}"></canvas>
@@ -2572,6 +2861,14 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const theme = this._evaluateTheme();
     const textcolor = theme === 'on' ? 'rgba(0, 0, 0)' : 'rgba(255, 255, 255)';
     const backgroundColor = theme === 'on' ? 'rgba(50,50,50, 0.1)' : 'rgba(255, 255, 255, 0.1)';
+    const secondaryColorblue = theme === 'on' ? 'rgb(110, 190, 240)' : 'rgb(110, 190, 240)';
+    
+    const summary = this.entity?.attributes?.minutely_summary  || ''; 
+    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
+    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
+    const customTemp = this._getCustomTemperature();
+    const customHumidity = this._getCustomHumidity();
+    const feels_like  = this.entity?.attributes?.apparent_temperature || 0;
     
     // 获取AQI数值和等级
     const aqiValue = aqi.aqi || aqi.value || 0;
@@ -2602,6 +2899,26 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return html`
       <div class="aqi-details-card" style="background-color: ${backgroundColor}; border-radius: 2vw; padding: 2vw; margin-top: 1.5vw;">
         
+        <!-- 新增：天气概况与传感器信息 -->
+        ${summary !== '' ? html`
+          <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw; margin-bottom: 1vw;">
+            天气概况：${summary}&ensp;&ensp;
+          </div>
+        `: ''}
+        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
+          天气温度：${temperature}<span style="font-size: 0.8em;">℃</span>&ensp;&ensp;
+          天气湿度：${humidity}<span style="font-size: 0.8em;">%</span>&ensp;
+        </div>
+        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
+          体感温度：${feels_like}<span style="font-size: 0.8em;">℃</span>&ensp;&ensp;
+        </div>
+        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
+          ${customTemp !== null ? html`传感器温度：${customTemp}<span style="font-size: 0.8em">℃</span>&ensp;&ensp;`: ''}
+          ${customHumidity !== null ? html`传感器湿度：${customHumidity}<span style="font-size: 0.8em;">%</span>&ensp;`: ''}
+        </div>
+        
+        <div style="margin-bottom: 2vw;"></div>
+
         <!-- AQI总览 -->
         <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 0.5vw; padding: 0.5vw;  border-radius: 1.5vw;">
           <div style="text-align: center;">
@@ -4021,7 +4338,7 @@ class XiaoshiWeatherPadCard extends LitElement {
     return this._instanceId;
   }
 
-  _drawTemperatureCurve(canvasId, points, color) {
+  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo = null) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -4066,13 +4383,8 @@ class XiaoshiWeatherPadCard extends LitElement {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
-      // 开始绘制路径
-      ctx.beginPath();
-      
       const { CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
-      
-      // 转换所有点为Canvas坐标
-      const canvasPoints = points.map((point, index) => {
+      const canvasPoints = points.map((point) => {
         const x = (point.x / 100) * canvas.width;
         const y = (point.y / CONTAINER_HEIGHT_PX) * canvas.height;
         return { x, y };
@@ -4089,45 +4401,50 @@ class XiaoshiWeatherPadCard extends LitElement {
         return;
       }
       
-      // 开始绘制平滑曲线，确保通过所有原始点
-      ctx.beginPath();
-      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-      
-      // 使用更保守的样条算法，减少曲线过度弯曲
-      const tension = 0.2; // 减小张力系数，避免过度弯曲
-      
-      for (let i = 0; i < canvasPoints.length - 1; i++) {
-        const p0 = canvasPoints[Math.max(0, i - 1)];
-        const p1 = canvasPoints[i];
-        const p2 = canvasPoints[i + 1];
-        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-        
-        // 计算控制点，限制控制点距离，避免过度弯曲
-        const dx1 = (p2.x - p0.x) * tension;
-        const dy1 = (p2.y - p0.y) * tension;
-        const dx2 = (p3.x - p1.x) * tension;
-        const dy2 = (p3.y - p1.y) * tension;
-        
-        // 限制控制点的垂直距离，防止曲线超出边界
-        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-        
-        const cp1x = p1.x + dx1;
-        const cp1y = p1.y + limitedDy1;
-        const cp2x = p2.x - dx2;
-        const cp2y = p2.y - limitedDy2;
-        
-        // 如果是第一段，使用二次贝塞尔
-        if (i === 0) {
-          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+      const tension = 0.2;
+      const drawSegment = (startIndex, endIndexInclusive, dashed) => {
+        ctx.beginPath();
+        if (dashed) {
+          ctx.setLineDash([6, 12]);
+          ctx.globalAlpha = 0.6;
         } else {
-          // 使用三次贝塞尔曲线，确保通过原始点
-          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
         }
+        ctx.moveTo(canvasPoints[startIndex].x, canvasPoints[startIndex].y);
+        for (let i = startIndex; i < endIndexInclusive; i++) {
+          const p0 = canvasPoints[Math.max(0, i - 1)];
+          const p1 = canvasPoints[i];
+          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
+          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+          const dx1 = (p2.x - p0.x) * tension;
+          const dy1 = (p2.y - p0.y) * tension;
+          const dx2 = (p3.x - p1.x) * tension;
+          const dy2 = (p3.y - p1.y) * tension;
+          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+          const cp1x = p1.x + dx1;
+          const cp1y = p1.y + limitedDy1;
+          const cp2x = p2.x - dx2;
+          const cp2y = p2.y - limitedDy2;
+          if (i === startIndex) {
+            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+          } else {
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          }
+        }
+        ctx.stroke();
+      };
+      if (dashedSegmentInfo && typeof dashedSegmentInfo.endIndex === 'number') {
+        const endIdx = Math.max(1, Math.min(canvasPoints.length - 1, dashedSegmentInfo.endIndex));
+        drawSegment(0, endIdx, true);
+        if (endIdx < canvasPoints.length - 1) {
+          drawSegment(endIdx, canvasPoints.length - 1, false);
+        }
+      } else {
+        drawSegment(0, canvasPoints.length - 1, false);
       }
-      
-      ctx.stroke();
     });
   }
 
@@ -4184,6 +4501,16 @@ class XiaoshiWeatherPadCard extends LitElement {
     const highTempData = this._generateTemperatureLine(forecastDays, extremes, true);
     const lowTempData = this._generateTemperatureLine(forecastDays, extremes, false);
     
+    // 检查是否需要虚线（如果有昨天的数据，则第一段为虚线）
+    let dashedSegmentInfo = null;
+    if (forecastDays.length > 0) {
+        const firstDay = forecastDays[0];
+        const weekday = this._getWeekday(firstDay.datetime);
+        if (weekday === '昨天') {
+            dashedSegmentInfo = { endIndex: 1 };
+        }
+    }
+    
     // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const highCanvasId = `high-temp-canvas-${instanceId}`;
@@ -4192,8 +4519,8 @@ class XiaoshiWeatherPadCard extends LitElement {
     // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
-        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)');
-        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)');
+        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)', dashedSegmentInfo);
+        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)', dashedSegmentInfo);
       }, 50);
     });
     
@@ -4221,7 +4548,7 @@ class XiaoshiWeatherPadCard extends LitElement {
 
           // 如果是昨天，设置透明度 
           const isYesterday = weekday !== '昨天' && weekday !== '前天';
-          const opacity = isYesterday ? 1 : 0.5;
+          const opacity = isYesterday ? 1 : 0.3;
           const theme = this._evaluateTheme();
           const hightbackground = isYesterday ? 
                 'linear-gradient(to bottom,rgba(255, 87, 34) 0%,rgba(255, 152, 0) 100%)':
@@ -4334,6 +4661,28 @@ class XiaoshiWeatherPadCard extends LitElement {
     const update_time = this.entity.attributes?.update_time || '未知时间';
     const sunRise = this.entity.attributes?.sun.sunrise || '';
     const sunSet = this.entity.attributes?.sun.sunset || '';
+    
+    // 获取额外属性
+    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
+    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
+    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
+    const windDir = this.entity.attributes?.winddir || '';
+    
+    // 获取UV指数
+    let uv = 0;
+    if (this.entity.attributes?.air_indices) {
+        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
+        if (uvIndex) {
+            uv = uvIndex.level || uvIndex.category || 0;
+        }
+    }
+    
+    // 获取AQI等级
+    let aqiCategory = '未知';
+    if (this.entity.attributes?.aqi) {
+        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
+    }
+
     // 获取颜色
     const fgColor = theme === 'on' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)';
     const bgColor = this.config.card_bg_color || (theme === 'on' ? 'rgb(255, 255, 255)' : 'rgb(50, 50, 50)');
@@ -4370,7 +4719,7 @@ class XiaoshiWeatherPadCard extends LitElement {
               <!-- 第二行：天气信息 + AQI -->
               <div class="weather-row">
                 <div class="weather-info">
-                  <span style="color: ${secondaryColor};">${condition} 
+                  <span style="color: ${secondaryColor}; font-size: 15px;">${condition} 
                     <span class="wind-direction">${this._getWindDirectionIcon(windBearing)}</span>
                     ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
                     ${pressure}<span style="font-size: 0.6em;">hPa </span>
@@ -4440,7 +4789,13 @@ class XiaoshiWeatherPadCard extends LitElement {
                 </div>
               </div>
               <div class="modal-body">
-                <xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>
+                ${this._hourlyModalMode === 'minutely' 
+                  ? (typeof this._renderMinutelyForecast === 'function' 
+                      ? this._renderMinutelyForecast() 
+                      : html`<xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>`)
+                  : (typeof this._renderHourlyForecast === 'function' 
+                      ? this._renderHourlyForecast() 
+                      : html`<xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>`)}
               </div>
             </div>
           </div>
@@ -5397,7 +5752,6 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     const secondaryColor = 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
-    // 构造分钟曲线点：与温度点同一坐标系，确保曲线穿过每个点中心
     const { BUTTON_HEIGHT_PX, CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
     const actualMinutes = minutelyForecast.length || 1;
     const positions = (() => {
@@ -5413,14 +5767,8 @@ class XiaoshiHourlyWeatherCard extends LitElement {
         return (maxTemp - tempVal) * unitPosition;
       });
     })();
-    
-    // 根据用户要求：dot模式下调2.5px，button模式上调3px
-    // 基础偏移：dot模式为2.5 (半径)，button模式为 BUTTON_HEIGHT_PX / 1.7 (约10px)
-    // 叠加修正：dot + 2.5, button - 3
     const isDotMode = this.config?.visual_style === 'dot';
-    const centerOffset = isDotMode 
-      ? (2.5 + 2.5)
-      : ((BUTTON_HEIGHT_PX / 1.7) - 3);
+    const centerOffset = isDotMode ? (2.5 + 2.5) : ((BUTTON_HEIGHT_PX / 1.7) - 3);
     const DOT_SHIFT_PX = 5;
     const points = minutelyForecast.map((_, index) => {
       const x = (index * 100) / actualMinutes + (100 / actualMinutes) / 2;
@@ -5428,41 +5776,32 @@ class XiaoshiHourlyWeatherCard extends LitElement {
       const y = Math.max(0, Math.min(positions[index] + centerOffset + extraShift, CONTAINER_HEIGHT_PX));
       return { x, y };
     });
-    
     const instanceId = this._getInstanceId();
     const canvasId = `minutely-temp-canvas-${instanceId}`;
-    
     this.updateComplete.then(() => {
       setTimeout(() => {
         this._drawTemperatureCurve(canvasId, points, 'rgba(76, 175, 80)');
       }, 50);
     });
-    
     return html`
       <div class="forecast-container-wrapper" style="position: relative; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x;">
         <div class="forecast-container" 
              style="display: grid; grid-template-columns: repeat(${minutelyForecast.length}, minmax(50px, 1fr)); gap: 2px; width: ${minutelyForecast.length * 50+(minutelyForecast.length-1)*2 }px;">
           <canvas class="temp-line-canvas temp-line-canvas-high temp-line-canvas-minutely" 
                   id="minutely-temp-canvas-${this._getInstanceId()}"></canvas>
-        
         ${minutelyForecast.map((minute, index) => {
           const timeStr = this._formatMinutelyTime(minute.datetime);
           const dateStr = this._formatMinutelyDate(minute.datetime);
           const temp = this._formatTemperature(minute.native_temperature);
-          
           const rainfall = parseFloat(minute.native_precipitation) || 0;
-          
           const pointY = points[index]?.y ?? (CONTAINER_HEIGHT_PX / 2 + centerOffset + (isDotMode ? DOT_SHIFT_PX : 0));
-          
           const RAINFALL_MAX = 1; 
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
           const topForDot = pointY - centerOffset;
-
           return html`
             <div class="forecast-day" style="background: ${backgroundColor};">
               <div class="forecast-weekday">${timeStr}</div>
               <div class="forecast-date" style="color: ${secondaryColor};">${dateStr}</div>
-              
               <div class="forecast-temp-container">
                 ${this.config.visual_style === 'dot' ? html`
                   <div class="temp-curve-minutely" style="top: ${topForDot}px">
@@ -5473,7 +5812,6 @@ class XiaoshiHourlyWeatherCard extends LitElement {
                     ${temp}°
                   </div>
                 `}
-                
                 ${rainfall > 0 ? html`
                   <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
@@ -5482,8 +5820,6 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
-        
-        <!-- 雨量标签行 -->
         ${minutelyForecast.map(minute => {
           const rainfall = parseFloat(minute.native_precipitation) || 0;
           return html`
@@ -5496,11 +5832,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
-        
-        <!-- 天气图标行 -->
         ${this._renderHourlyWeatherIcons(minutelyForecast)}
-        
-        <!-- 风向风级行 -->
         ${this._renderHourlyWindInfo(minutelyForecast)}
         </div>
       </div>
@@ -5681,6 +6013,138 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     }
   }
 
+  _getWarningColor(warning) {
+    if (!warning || warning.length === 0) return "#FFA726"; // 默认颜色
+    
+    let level = "";
+    const priority = ["红色", "橙色", "黄色", "蓝色"];
+    
+    for (let i = 0; i < warning.length; i++) {
+      const currentLevel = warning[i].level;
+      if (priority.indexOf(currentLevel) < priority.indexOf(level) || level == "") {
+        level = currentLevel;
+      }
+    }
+    
+    return this._getWarningColorForLevel(level);
+  }
+
+  _getWarningColorForLevel(level) {
+    if (level == "红色") return "rgb(255,50,50)";
+    if (level == "橙色") return "rgb(255,100,0)";
+    if (level == "黄色") return "rgb(255,200,0)";
+    if (level == "蓝色") return "rgb(50,150,200)";
+    
+    return "#FFA726"; // 默认颜色
+  }
+
+  _toggleWarningModal() {
+    if (this.entity?.attributes?.warning && window.browser_mod) {
+       window.browser_mod.service('popup', {
+        title: '预警信息',
+        content: {
+          type: 'markdown',
+          content: this.entity.attributes.warning.map(w => `### ${w.title}\n${w.text}`).join('\n\n---\n\n')
+        }
+      });
+    }
+  }
+
+  _getAqiCategoryHtml() {
+    const category = this.entity.attributes?.aqi?.category;
+    if (!category) return '';
+    
+    let color = '';
+    switch(category) {
+      case '优':
+        color = '#4CAF50'; // 绿色
+        break;
+      case '良':
+        color = '#FFC107'; // 黄色
+        break;
+      case '轻度污染':
+        color = '#FF9800'; // 橙色
+        break;
+      case '中度污染':
+      case '重度污染':
+      case '严重污染':
+        color = '#F44336'; // 红色
+        break;
+      default:
+        color = '#9E9E9E'; // 灰色（其他未知类别）
+    }
+    
+    return html`
+            <button class="toggle-btn-aqi" style="color: ${color};" @click="${() => this._toggleApiInfo()}">
+              ${category}
+            </button>
+            ` 
+  }
+
+  _toggleApiInfo() {
+    if (window.browser_mod && this.config) {
+       window.browser_mod.service('popup', {
+         title: '空气质量',
+         card: {
+           type: 'custom:xiaoshi-aqi-weather-card',
+           entity: this.config.entity,
+           theme: this.config.theme
+         }
+       });
+    }
+  }
+
+  _renderDetailedInfo() {
+    const theme = this._evaluateTheme();
+    const secondaryColor = 'rgb(110, 190, 240)';
+    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
+    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
+    const condition = this.entity.attributes?.condition_cn || '未知';
+    const windSpeed = this.entity.attributes?.wind_speed || 0;
+    const pressure = this.entity.attributes?.pressure || 0;
+    const visibility = this.entity.attributes?.visibility || 0;
+    const warning = this.entity.attributes?.warning || [];
+    const warningColor = this._getWarningColor(warning);
+    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
+    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
+    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
+    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
+    const windDir = this.entity.attributes?.winddir || '';
+    let uv = 0;
+    if (this.entity.attributes?.air_indices) {
+      const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
+      if (uvIndex) {
+        uv = uvIndex.level || uvIndex.category || 0;
+      }
+    }
+    let aqiCategory = '未知';
+    if (this.entity.attributes?.aqi) {
+      aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
+    }
+
+    return html`
+        <div style="padding: 0 10px; text-align: left;">
+          <div class="weather-temperature" style="height: auto; font-size: 15px; margin-bottom: 6px;">
+            ${temperature}<span> ℃（天气温度）&ensp;</span>
+            ${feelsLike}<span> ℃（体感温度）&ensp;</span>
+            ${humidity}<span> %（天气湿度）</span>
+            ${hasWarning ? html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningModal()}">⚠ ${warning.length}</span>` : ''}
+          </div>
+          <div class="weather-info" style="height: auto; font-size: 15px; margin-top: 0; white-space: normal;">
+            <span style="color: ${secondaryColor};">
+              ${condition}&ensp;
+              气压:${pressure}hPa&ensp;
+              云量:${cloud}%&ensp;
+              风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;<br>
+              能见度:${visibility}km&ensp;
+              紫外线:${uv}级&ensp;
+              空气质量: ${aqiCategory}
+            </span>
+          </div>
+        </div>
+    `;
+  }
+
   render() {
     const forecastData = this.forecastMode === 'minutely' ? this._getMinutelyForecast() : this._getHourlyForecast();
     
@@ -5733,23 +6197,8 @@ class XiaoshiHourlyWeatherCard extends LitElement {
               <div class="weather-icon">
                 <img src="${this._getWeatherIcon(condition)}" alt="${condition}">
               </div>
-              <div class="weather-details">
-                <div class="weather-temperature">
-                  ${temperature}<font size="1px"><b> ℃&ensp;</b></font>
-                  ${humidity}<font size="1px"><b> % </b></font>
-                </div>
-                <div class="weather-info">
-                  <span style="color: ${secondaryColor};">${condition}   
-                    ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <div class="weather-right-align" style="flex-shrink: 0;">
-              <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px">
-                <!-- 指数 -->
-                ${this._getAqiCategoryHtml()}
+              <div class="weather-details" style="flex: 1;">
+                ${this._renderDetailedInfo()}
               </div>
             </div>
           </div>
@@ -5768,81 +6217,53 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     const secondaryColor = 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
-    // 生成温度曲线坐标（小时天气只有一个温度）
     const tempData = this._generateHourlyTemperatureLine(hourlyForecast, extremes, true);
-    
-    // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const canvasId = `hourly-temp-canvas-${instanceId}`;
-    
-    // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
         this._drawTemperatureCurve(canvasId, tempData.points, 'rgba(156, 39, 176)');
       }, 50);
     });
-    
     return html`
       <div class="forecast-container-wrapper" style="position: relative; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x;">
         <div class="forecast-container" 
              style="display: grid; grid-template-columns: repeat(${hourlyForecast.length}, minmax(50px, 1fr)); gap: 2px; width: ${hourlyForecast.length * 50+(hourlyForecast.length-1)*2 }px;">
-          <!-- 小时温度连接线 Canvas - 绝对定位覆盖整个可滚动区域 -->
           <canvas class="temp-line-canvas temp-line-canvas-high temp-line-canvas-hourly" 
                   id="hourly-temp-canvas-${this._getInstanceId()}"></canvas>
-        
         ${hourlyForecast.map((hour, index) => {
           const timeStr = this._formatHourlyTime(hour.datetime);
           const dateStr = this._formatHourlyDate(hour.datetime);
           const temp = this._formatTemperature(hour.native_temperature);
-          
-          // 获取雨量信息
           const rainfall = parseFloat(hour.native_precipitation) || 0;
-          
-          // 计算温度位置（简化版）
           const { minTemp, maxTemp, range, allEqual } = extremes;
           const { BUTTON_HEIGHT_PX, CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
-          // 使用实际可用高度：容器高度减去按钮高度
           const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX;
-          
           let finalTopPosition;
           if (allEqual) {
-            // 如果所有温度相等，将位置设置在中间
             finalTopPosition = availableHeight / 2;
           } else {
             const unitPosition = range === 0 ? 0 : availableHeight / range;
             const tempValue = parseFloat(hour.native_temperature) || 0;
             const topPosition = (maxTemp - tempValue) * unitPosition;
-            // 最高温度应该显示在顶部(position: 0)，最低温度在底部(position: availableHeight)
             finalTopPosition = Math.max(0, Math.min(topPosition, availableHeight));
           }
-          
-          // 计算雨量矩形高度和位置
-          const RAINFALL_MAX = 16; // 最大雨量16mm
+          const RAINFALL_MAX = 16;
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
-
           return html`
             <div class="forecast-day" style="background: ${backgroundColor};">
-              <!-- 时间（hh:mm） -->
               <div class="forecast-weekday">${timeStr}</div>
-              
-              <!-- 日期（mm月dd日） -->
               <div class="forecast-date" style="color: ${secondaryColor};">${dateStr}</div>
-              
-              <!-- 温度（紫色） -->
               <div class="forecast-temp-container">
                 ${this.config.visual_style === 'dot' ? html`
-                  <!-- 圆点模式 -->
                   <div class="temp-curve-hourly" style="top: ${finalTopPosition}px">
                     <div class="temp-text">${temp}°</div>
                   </div>
                 ` : html`
-                  <!-- 按钮模式 -->
                   <div class="temp-curve-hourly" style="top: ${finalTopPosition}px">
                     ${temp}°
                   </div>
                 `}
-                
-                <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
                   <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
@@ -5851,8 +6272,6 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
-        
-        <!-- 雨量标签行 - 10列网格 -->
         ${hourlyForecast.map(hour => {
           const rainfall = parseFloat(hour.native_precipitation) || 0;
           return html`
@@ -5865,17 +6284,13 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
-        
-        <!-- 天气图标行 -->
         ${this._renderHourlyWeatherIcons(hourlyForecast)}
-        
-        <!-- 风向风级行 -->
         ${this._renderHourlyWindInfo(hourlyForecast)}
       </div>
     `;
   }
 
-  _drawTemperatureCurve(canvasId, points, color) {
+  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -5920,13 +6335,8 @@ class XiaoshiHourlyWeatherCard extends LitElement {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
-      // 开始绘制路径
-      ctx.beginPath();
-      
       const { CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
-      
-      // 转换所有点为Canvas坐标
-      const canvasPoints = points.map((point, index) => {
+      const canvasPoints = points.map((point) => {
         const x = (point.x / 100) * canvas.width;
         const y = (point.y / CONTAINER_HEIGHT_PX) * canvas.height;
         return { x, y };
@@ -5943,45 +6353,50 @@ class XiaoshiHourlyWeatherCard extends LitElement {
         return;
       }
       
-      // 开始绘制平滑曲线，确保通过所有原始点
-      ctx.beginPath();
-      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-      
-      // 使用更保守的样条算法，减少曲线过度弯曲
-      const tension = 0.2; // 减小张力系数，避免过度弯曲
-      
-      for (let i = 0; i < canvasPoints.length - 1; i++) {
-        const p0 = canvasPoints[Math.max(0, i - 1)];
-        const p1 = canvasPoints[i];
-        const p2 = canvasPoints[i + 1];
-        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-        
-        // 计算控制点，限制控制点距离，避免过度弯曲
-        const dx1 = (p2.x - p0.x) * tension;
-        const dy1 = (p2.y - p0.y) * tension;
-        const dx2 = (p3.x - p1.x) * tension;
-        const dy2 = (p3.y - p1.y) * tension;
-        
-        // 限制控制点的垂直距离，防止曲线超出边界
-        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-        
-        const cp1x = p1.x + dx1;
-        const cp1y = p1.y + limitedDy1;
-        const cp2x = p2.x - dx2;
-        const cp2y = p2.y - limitedDy2;
-        
-        // 如果是第一段，使用二次贝塞尔
-        if (i === 0) {
-          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+      const tension = 0.2;
+      const drawSegment = (startIndex, endIndexInclusive, dashed) => {
+        ctx.beginPath();
+        if (dashed) {
+          ctx.setLineDash([6, 12]);
+          ctx.globalAlpha = 0.6;
         } else {
-          // 使用三次贝塞尔曲线，确保通过原始点
-          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
         }
+        ctx.moveTo(canvasPoints[startIndex].x, canvasPoints[startIndex].y);
+        for (let i = startIndex; i < endIndexInclusive; i++) {
+          const p0 = canvasPoints[Math.max(0, i - 1)];
+          const p1 = canvasPoints[i];
+          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
+          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+          const dx1 = (p2.x - p0.x) * tension;
+          const dy1 = (p2.y - p0.y) * tension;
+          const dx2 = (p3.x - p1.x) * tension;
+          const dy2 = (p3.y - p1.y) * tension;
+          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+          const cp1x = p1.x + dx1;
+          const cp1y = p1.y + limitedDy1;
+          const cp2x = p2.x - dx2;
+          const cp2y = p2.y - limitedDy2;
+          if (i === startIndex) {
+            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+          } else {
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          }
+        }
+        ctx.stroke();
+      };
+      if (dashedSegmentInfo && typeof dashedSegmentInfo.endIndex === 'number') {
+        const endIdx = Math.max(1, Math.min(canvasPoints.length - 1, dashedSegmentInfo.endIndex));
+        drawSegment(0, endIdx, true);
+        if (endIdx < canvasPoints.length - 1) {
+          drawSegment(endIdx, canvasPoints.length - 1, false);
+        }
+      } else {
+        drawSegment(0, canvasPoints.length - 1, false);
       }
-      
-      ctx.stroke();
     });
   }
 
