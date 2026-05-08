@@ -2,49 +2,65 @@
 
 基于原作者 [dscao/qweather](https://github.com/dscao/qweather) 修改，并继续维护。
 
-本仓库同时包含：
+这是一个适用于 Home Assistant 的和风天气项目，仓库内同时包含：
 
-- `custom_components/qweather` 集成
-- 配套天气前端卡片 `custom_components/qweather/www/weather-card.js`
+- `custom_components/qweather`：集成代码
+- `custom_components/qweather/www/weather-card.js`：前端天气卡片
 
-本次卡片重构只更新前端卡片文件，不改动集成逻辑。
+这次更新主要聚焦天气卡片重构，集成本身保持原样。
 
-## 官方文档
+## 项目说明
+
+- 数据来源：和风天气官方 API
+- 适用平台：Home Assistant
+- 仓库内容：集成 + 前端天气卡片
+
+官方文档：
 
 - [和风天气开发文档](https://dev.qweather.com/docs/)
 - [和风天气数据更新时间说明](https://dev.qweather.com/docs/resource/glossary/#update-time)
 
-## 安装
+## 安装方式
 
-1. 将 `qweather` 文件夹复制到 Home Assistant 配置目录下的 `custom_components` 中。
+### 方式一：手动安装
+
+1. 将仓库中的 `custom_components/qweather` 复制到 Home Assistant 配置目录下的 `custom_components` 中。
 2. 重启 Home Assistant。
 3. 在 Home Assistant 中添加并配置 `qweather` 集成。
 
+### 方式二：通过 HACS 安装
+
+如果你已经在使用 HACS，也可以按你的现有方式将该仓库作为自定义集成添加并安装。
+
 ## 前端卡片资源
 
-如果你手动管理 Lovelace 资源，请确认已经加载卡片资源：
+如果你手动管理 Lovelace 资源，请确认前端卡片资源已经正确加载。
+
+常见写法如下：
 
 ```yaml
 url: /local/qweather-card/qweather-card.js
 type: module
 ```
 
-如果你的环境实际加载的是 `custom_components/qweather/www/weather-card.js` 对应资源路径，请按你的现有部署方式保持一致即可。
+如果你的环境实际使用的是其它静态资源路径，请按你的现有部署方式保持一致，不需要强行改成同一写法。
 
-## 天气卡片说明
+## `xiaoshi-weather-pad-card` 说明
 
-新版 `xiaoshi-weather-pad-card` 采用毛玻璃风格重构，保留并整合了原有主要天气信息：
+新版 `xiaoshi-weather-pad-card` 采用毛玻璃风格重构，重点是把原本分散的天气信息整合到一个更完整的弹窗界面中。
 
-- 当前天气
-- 每日 / 小时 / 分钟预报
-- AQI 与污染物数据
-- 生活指数
-- 日出日落
-- 预警详情
+主要能力包括：
 
-支持在同一界面中切换 `每日 / 小时 / 分钟` 预报，也支持配置多个天气实体切换显示。
+- 当前天气信息展示
+- 每日 / 小时 / 分钟预报切换
+- AQI 与污染物信息展示
+- 生活指数展示与详情弹层
+- 预警信息展示与详情弹层
+- 日出日落信息展示
+- 桌面端鼠标拖动预报滚动区
+- 平板与触屏设备横向滑动预报区域
 
-## 卡片配置示例
+## 卡片配置
 
 ### 单实体
 
@@ -66,37 +82,40 @@ entity_names:
 default_entity_index: 0
 ```
 
-### 兼容说明
+## 配置兼容性
 
-- 未配置 `entities` 时，会回退使用原有 `entity`
-- `entity_names` 可选；未设置时默认使用 `friendly_name` 或实体 ID
+- 未配置 `entities` 时，会自动回退到原有 `entity`
+- `entity_names` 为可选项
+- 未设置 `entity_names` 时，默认显示 `friendly_name`，否则回退到实体 ID
+- `default_entity_index` 默认值为 `0`
 
 ## 使用建议
 
-- 推荐在弹窗中使用这张卡，以获得完整布局体验
-- 桌面端支持鼠标拖动下方预报横向滚动区
-- 平板与触屏设备支持原生横向滑动
+- 推荐在弹窗中使用 `xiaoshi-weather-pad-card`，能够更完整地展示布局和交互
+- 桌面端可以直接用鼠标拖动下方预报滚动区
+- 平板和触屏设备可直接横向滑动预报内容
 
 ## 搜索天气说明
 
-搜索天气的实体在城市为空时，表示当前未提供可用数据，这是正常状态，不需要手动删除实体。录入城市后会重新加载。
+当搜索天气对应的实体城市为空时，表示当前没有可用数据，这是正常状态，不需要手动删除。录入城市后会重新加载。
 
 ## 更新说明
 
 ### 2026.05.08
 
-1. 重构 `xiaoshi-weather-pad-card` 的整体视觉与布局
+1. 重构 `xiaoshi-weather-pad-card` 整体视觉与布局
 2. 将每日、小时、分钟预报整合到同一界面切换显示
-3. 优化 AQI、生活指数、预警、日出日落与细节弹窗表现
-4. 增加桌面端鼠标拖动预报滚动区支持
+3. 优化 AQI、生活指数、预警、日出日落与二级详情弹层
+4. 优化弹窗、滑块、卡片层级与毛玻璃样式细节
+5. 增加桌面端鼠标拖动预报滚动区支持
 
 ### 2025.08.08
 
-1. 增加 HA 启动时，优先启动“移动应用”，后启动本集成
+1. 增加 HA 启动时优先启动“移动应用”，后启动本集成
 
 ### 2025.08.02
 
-1. 完善并修改集成逻辑
+1. 完善并调整集成逻辑
 
 ### 2025.08.02
 
