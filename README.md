@@ -1,6 +1,6 @@
 # 和风天气 - 官方 API 版
 
-基于原作者 [dscao/qweather](https://github.com/dscao/qweather) 修改，并继续维护。
+基于原作者 [xiaoshi930/qweather](https://github.com/xiaoshi930/qweather) 修改，并继续维护。
 
 这是一个适用于 Home Assistant 的和风天气项目，仓库内同时包含：
 
