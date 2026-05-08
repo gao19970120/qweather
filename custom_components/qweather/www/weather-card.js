@@ -1123,27 +1123,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return iconMap[condition] || (isDark ? `${iconPath}/${condition}-暗黑.svg` : `${iconPath}/${condition}.svg`);
   }
 
-  _getWarningColorForLevel(level) {
-    if (level == "红色") return "rgb(255,50,50)";
-    if (level == "橙色") return "rgb(255,100,0)";
-    if (level == "黄色") return "rgb(255,200,0)";
-    if (level == "蓝色") return "rgb(50,150,200)";
-    return "#FFA726";
-  }
-
-  _getWarningColor(warning) {
-    if (!warning || warning.length === 0) return "#FFA726";
-    let level = "";
-    const priority = ["红色", "橙色", "黄色", "蓝色"];
-    for (let i = 0; i < warning.length; i++) {
-      const currentLevel = warning[i].level;
-      if (priority.indexOf(currentLevel) < priority.indexOf(level) || level == "") {
-        level = currentLevel;
-      }
-    }
-    return this._getWarningColorForLevel(level);
-  }
-
   _formatTemperature(temp) {
     if (temp === undefined || temp === null) return '--';
     return temp.toString().includes('.') ? temp : temp;
@@ -1228,23 +1207,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
   _getMinutelyForecast() {
     if (!this.entity?.attributes?.minutely_forecast) return [];
     return this.entity.attributes.minutely_forecast.slice(0, 24);
-  }
-
-  _getMinutelyTemperatureExtremes() {
-    let temperatures = [];
-    const minutelyForecast = this._getMinutelyForecast();
-    if (minutelyForecast.length === 0) {
-      return { minTemp: 0, maxTemp: 0, range: 0, allEqual: true };
-    }
-    temperatures = minutelyForecast.map(item => parseFloat(item.native_temperature) || 0);
-
-    const minTemp = Math.min(...temperatures);
-    const maxTemp = Math.max(...temperatures);
-    const range = maxTemp - minTemp;
-    
-    const allEqual = temperatures.every(temp => temp === temperatures[0]);
-    
-    return { minTemp, maxTemp, range, allEqual };
   }
 
   _toggleForecastMode() {
@@ -1617,7 +1579,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return Math.random().toString(36).substr(2, 9);
   }
 
-  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo = null) {
+  _drawTemperatureCurve(canvasId, points, color) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -1647,6 +1609,15 @@ class XiaoshiWeatherPhoneCard extends LitElement {
       // 清除画布
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
+      // 设置线条样式
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6; // 固定线宽
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // 开始绘制路径
+      ctx.beginPath();
+      
       const { CONTAINER_HEIGHT_VW } = XiaoshiWeatherPhoneCard.TEMPERATURE_CONSTANTS;
       
       // 转换所有点为Canvas坐标
@@ -1662,168 +1633,50 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           ctx.beginPath();
           ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
           ctx.lineTo(canvasPoints[1].x, canvasPoints[1].y);
-          
-          // 应用虚线样式（如果有）
-          if (dashedSegmentInfo && dashedSegmentInfo.endIndex >= 0) {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 6;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = 0.6;
-            ctx.setLineDash([8, 8]);
-          } else {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 6;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = 1;
-            ctx.setLineDash([]);
-          }
           ctx.stroke();
         }
         return;
       }
       
+      // 开始绘制平滑曲线，确保通过所有原始点
+      ctx.beginPath();
+      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+      
       // 使用更保守的样条算法，减少曲线过度弯曲
       const tension = 0.2; // 减小张力系数，避免过度弯曲
       
-      // 判断是否需要分两段绘制
-      if (dashedSegmentInfo && dashedSegmentInfo.endIndex >= 0 && dashedSegmentInfo.endIndex < canvasPoints.length - 1) {
-        // 第一段：虚线，0.6透明度（前天、昨天、今天的左半部分）
-        const dashedEndIndex = Math.min(dashedSegmentInfo.endIndex, canvasPoints.length - 2);
-        // 分割点位于"今天"的中心位置
-        const splitX = canvasPoints[dashedEndIndex].x;
+      for (let i = 0; i < canvasPoints.length - 1; i++) {
+        const p0 = canvasPoints[Math.max(0, i - 1)];
+        const p1 = canvasPoints[i];
+        const p2 = canvasPoints[i + 1];
+        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
         
-        // 绘制第一段（虚线）
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalAlpha = 0.6;
-        ctx.setLineDash([6, 12]);
-        ctx.beginPath();
+        // 计算控制点，限制控制点距离，避免过度弯曲
+        const dx1 = (p2.x - p0.x) * tension;
+        const dy1 = (p2.y - p0.y) * tension;
+        const dx2 = (p3.x - p1.x) * tension;
+        const dy2 = (p3.y - p1.y) * tension;
         
-        for (let i = 0; i <= dashedEndIndex; i++) {
-          const p0 = canvasPoints[Math.max(0, i - 1)];
-          const p1 = canvasPoints[i];
-          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
-          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-          
-          const dx1 = (p2.x - p0.x) * tension;
-          const dy1 = (p2.y - p0.y) * tension;
-          const dx2 = (p3.x - p1.x) * tension;
-          const dy2 = (p3.y - p1.y) * tension;
-          
-          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-          
-          const cp1x = p1.x + dx1;
-          const cp1y = p1.y + limitedDy1;
-          const cp2x = p2.x - dx2;
-          const cp2y = p2.y - limitedDy2;
-          
-          // 计算曲线终点，需要在splitX处截断
-          const isLastSegment = i === dashedEndIndex;
-          
-          if (i === 0) {
-            ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-          }
-          
-          if (isLastSegment) {
-            // 最后一段画到"今天"中心点，使用更长的虚线段以保持虚线效果
-            ctx.lineTo(splitX, p1.y);
-          } else {
-            if (i === 0) {
-              ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
-            } else {
-              ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-            }
-          }
+        // 限制控制点的垂直距离，防止曲线超出边界
+        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+        
+        const cp1x = p1.x + dx1;
+        const cp1y = p1.y + limitedDy1;
+        const cp2x = p2.x - dx2;
+        const cp2y = p2.y - limitedDy2;
+        
+        // 如果是第一段，使用二次贝塞尔
+        if (i === 0) {
+          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
+        } else {
+          // 使用三次贝塞尔曲线，确保通过原始点
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
         }
-        ctx.stroke();
-        
-        // 绘制第二段（实线，正常透明度）
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalAlpha = 1;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        
-        // 从"今天"中心点开始绘制第二段
-        for (let i = dashedEndIndex; i < canvasPoints.length - 1; i++) {
-          const p0 = canvasPoints[Math.max(0, i - 1)];
-          const p1 = canvasPoints[i];
-          const p2 = canvasPoints[i + 1];
-          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-          
-          const dx1 = (p2.x - p0.x) * tension;
-          const dy1 = (p2.y - p0.y) * tension;
-          const dx2 = (p3.x - p1.x) * tension;
-          const dy2 = (p3.y - p1.y) * tension;
-          
-          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-          
-          const cp1x = p1.x + dx1;
-          const cp1y = p1.y + limitedDy1;
-          const cp2x = p2.x - dx2;
-          const cp2y = p2.y - limitedDy2;
-          
-          // 如果是第一段（接续点），起点为splitX
-          if (i === dashedEndIndex) {
-            ctx.moveTo(splitX, p1.y);
-             ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-          } else {
-             ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-          }
-        }
-        ctx.stroke();
-        
-      } else {
-        // 正常绘制（全部实线）
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalAlpha = 1;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        
-        ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-        
-        for (let i = 0; i < canvasPoints.length - 1; i++) {
-          const p0 = canvasPoints[Math.max(0, i - 1)];
-          const p1 = canvasPoints[i];
-          const p2 = canvasPoints[i + 1];
-          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-          
-          const dx1 = (p2.x - p0.x) * tension;
-          const dy1 = (p2.y - p0.y) * tension;
-          const dx2 = (p3.x - p1.x) * tension;
-          const dy2 = (p3.y - p1.y) * tension;
-          
-          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-          
-          const cp1x = p1.x + dx1;
-          const cp1y = p1.y + limitedDy1;
-          const cp2x = p2.x - dx2;
-          const cp2y = p2.y - limitedDy2;
-          
-          if (i === 0) {
-            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
-          } else {
-            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-          }
-        }
-        
-        ctx.stroke();
       }
+      
+      ctx.stroke();
     });
   }
 
@@ -2021,27 +1874,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const enableHourlyForecast = this.entity.attributes?.hourly_forecast && this.entity.attributes?.hourly_forecast.length > 0;
     const sunRise = this.entity.attributes?.sun.sunrise || '';
     const sunSet = this.entity.attributes?.sun.sunset || '';
-    
-    // 获取额外属性
-    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
-    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
-    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
-    const windDir = this.entity.attributes?.winddir || '';
-    
-    // 获取UV指数
-    let uv = 0;
-    if (this.entity.attributes?.air_indices) {
-        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
-        if (uvIndex) {
-            uv = uvIndex.level || uvIndex.category || 0;
-        }
-    }
-    
-    // 获取AQI等级
-    let aqiCategory = '未知';
-    if (this.entity.attributes?.aqi) {
-        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
-    }
 
     // 获取颜色
     const fgColor = theme === 'on' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)';
@@ -2067,11 +1899,10 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                     html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
                 </div>
                 <div class="weather-info">
-                    <span style="color: ${secondaryColor}; font-size: 3vw;">
-                        ${condition}  
-                        ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
-                        ${pressure}<span style="font-size: 0.6em;">hPa </span>
-                        ${visibility}<span style="font-size: 0.6em;">km </span>
+                    <span style="color: ${secondaryColor};">${condition}  
+                      ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
+                      ${pressure}<span style="font-size: 0.6em;">hPa </span>
+                      ${visibility}<span style="font-size: 0.6em;">km </span>
                     </span>
                     ${this._getAqiCategoryHtml()}
                 </div>
@@ -2085,7 +1916,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                 <!-- 天气指数按钮 -->
                 ${this.entity.attributes?.air_indices && this.entity.attributes.air_indices.length > 0 ? html`
                   <div class="forecast-toggle-button">
-                    <button class="toggle-btn" style="margin-right: 1vw; background: #2E7D32;" @click="${() => this._toggleIndicesDetails()}">
+                    <button class="toggle-btn" style="margin-right: 1vw; background: rgb(51, 122, 159);" @click="${() => this._toggleIndicesDetails()}">
                       天气指数
                     </button>
                   </div>
@@ -2157,16 +1988,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const highTempData = this._generateTemperatureLine(forecastDays, extremes, true);
     const lowTempData = this._generateTemperatureLine(forecastDays, extremes, false);
     
-    // 检查是否需要虚线（如果有昨天的数据，则第一段为虚线）
-    let dashedSegmentInfo = null;
-    if (forecastDays.length > 0) {
-        const firstDay = forecastDays[0];
-        const weekday = this._getWeekday(firstDay.datetime);
-        if (weekday === '昨天') {
-            dashedSegmentInfo = { endIndex: 1 };
-        }
-    }
-    
     // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const highCanvasId = `high-temp-canvas-${instanceId}`;
@@ -2175,8 +1996,8 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
-        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)', dashedSegmentInfo);
-        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)', dashedSegmentInfo);
+        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)');
+        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)');
       }, 50);
     });
     
@@ -2204,7 +2025,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           
           // 如果是昨天，设置透明度 
           const isYesterday = weekday !== '昨天' && weekday !== '前天';
-          const opacity = isYesterday ? 1 : 0.3;
+          const opacity = isYesterday ? 1 : 0.5;
           const theme = this._evaluateTheme();
 
           const hightbackground = isYesterday ? 
@@ -2230,7 +2051,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
           // 计算雨量矩形高度和位置
           
           const {CONTAINER_HEIGHT_VW } = XiaoshiWeatherPhoneCard.TEMPERATURE_CONSTANTS;
-          const RAINFALL_MAX = 50; // 最大雨量50mm
+          const RAINFALL_MAX = 25; // 最大雨量25mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * CONTAINER_HEIGHT_VW+4, CONTAINER_HEIGHT_VW+4); // 最大高度21.6vw（到日期下面）
 
           return html`
@@ -2263,7 +2084,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: calc(${rainfallHeight}vw + 10px); opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
@@ -2301,39 +2122,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const secondaryColor = theme === 'on' ? 'rgb(60, 140, 190)' : 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
-    // 获取实时天气数据
-    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
-    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
-    const condition = this.entity.attributes?.condition_cn || '未知';
-    const windSpeed = this.entity.attributes?.wind_speed || 0;
-    const windBearing = this.entity.attributes?.wind_bearing || 0;
-    const pressure = this.entity.attributes?.pressure || 0;
-    const visibility = this.entity.attributes?.visibility || 0;
-    const warning = this.entity.attributes?.warning || [];
-    const warningColor = this._getWarningColor(warning);
-    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
-    
-    // 获取额外属性
-    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
-    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
-    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
-    const windDir = this.entity.attributes?.winddir || '';
-    
-    // 获取UV指数
-    let uv = 0;
-    if (this.entity.attributes?.air_indices) {
-        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
-        if (uvIndex) {
-            uv = uvIndex.level || uvIndex.category || 0;
-        }
-    }
-    
-    // 获取AQI等级
-    let aqiCategory = '未知';
-    if (this.entity.attributes?.aqi) {
-        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
-    }
-    
     // 生成温度曲线坐标（小时天气只有一个温度）
     const tempData = this._generateTemperatureLine(hourlyForecast, extremes, true);
     
@@ -2357,28 +2145,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
      
     return html`
       <div class="hourly-forecast-scroll-container">
-        <!-- 详细天气信息显示区域 -->
-        <div style="padding: 2vw; margin-bottom: 2vw; text-align: left;">
-            <div class="weather-temperature" style="height: auto; font-size: 5vw; margin-bottom: 1vw;">
-              ${temperature}<font size="1vw"><b> ℃（天气温度）&ensp;</b></font>
-              ${feelsLike}<font size="1vw"><b> ℃（体感温度）&ensp;</b></font>
-              ${humidity}<font size="1vw"><b> %（天气湿度）</b></font>
-              ${hasWarning ? 
-                html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
-            </div>
-            <div class="weather-info" style="height: auto; font-size: 3vw; margin-top: 0; white-space: normal;">
-                <span style="color: ${secondaryColor};">
-                  ${condition}&ensp;
-                  气压:${pressure}hPa&ensp;
-                  云量:${cloud}%&ensp;
-                  风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;
-                  能见度:${visibility}km&ensp;
-                  紫外线:${uv}级&ensp;
-                  空气质量: ${aqiCategory}
-                </span>
-            </div>
-        </div>
-        
         <div class="hourly-forecast-container" style="grid-template-columns: repeat(${columns}, ${columnWidth}vw);">
           <!-- 小时温度连接线 Canvas -->
           <canvas class="temp-line-canvas temp-line-canvas-high" id="hourly-temp-canvas-${this._getInstanceId()}"></canvas>
@@ -2408,7 +2174,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
             }
             
             // 计算雨量矩形高度和位置
-            const RAINFALL_MAX = 16; // 最大雨量16mm
+            const RAINFALL_MAX = 5; // 最大雨量5mm
             const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * CONTAINER_HEIGHT_VW+4, CONTAINER_HEIGHT_VW+4); // 最大高度21.6vw（到日期下面）
 
 
@@ -2436,7 +2202,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                   
                   <!-- 雨量填充矩形 -->
                   ${rainfall > 0 ? html`
-                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                    <div class="rainfall-fill" style="height: calc(${rainfallHeight}vw + 10px); opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                   ` : ''}
                 </div>
                 <div class="forecast-temp-null"></div>
@@ -2475,39 +2241,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const secondaryColor = theme === 'on' ? 'rgb(60, 140, 190)' : 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
-    // 获取实时天气数据
-    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
-    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
-    const condition = this.entity.attributes?.condition_cn || '未知';
-    const windSpeed = this.entity.attributes?.wind_speed || 0;
-    const windBearing = this.entity.attributes?.wind_bearing || 0;
-    const pressure = this.entity.attributes?.pressure || 0;
-    const visibility = this.entity.attributes?.visibility || 0;
-    const warning = this.entity.attributes?.warning || [];
-    const warningColor = this._getWarningColor(warning);
-    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
-    
-    // 获取额外属性
-    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
-    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
-    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
-    const windDir = this.entity.attributes?.winddir || '';
-    
-    // 获取UV指数
-    let uv = 0;
-    if (this.entity.attributes?.air_indices) {
-        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
-        if (uvIndex) {
-            uv = uvIndex.level || uvIndex.category || 0;
-        }
-    }
-    
-    // 获取AQI等级
-    let aqiCategory = '未知';
-    if (this.entity.attributes?.aqi) {
-        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
-    }
-    
     // 生成温度曲线坐标（分钟天气只有一个温度）
     const tempData = this._generateTemperatureLine(minutelyForecast, extremes, true);
     
@@ -2528,28 +2261,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
      
     return html`
       <div class="hourly-forecast-scroll-container">
-        <!-- 详细天气信息显示区域 -->
-        <div style="padding: 2vw; margin-bottom: 2vw; text-align: left;">
-            <div class="weather-temperature" style="height: auto; font-size: 5vw; margin-bottom: 1vw;">
-              ${temperature}<font size="1vw"><b> ℃（天气温度）&ensp;</b></font>
-              ${feelsLike}<font size="1vw"><b> ℃（体感温度）&ensp;</b></font>
-              ${humidity}<font size="1vw"><b> %（天气湿度）</b></font>
-              ${hasWarning ? 
-                html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningDetails()}">⚠ ${warning.length}</span>` : ''}
-            </div>
-            <div class="weather-info" style="height: auto; font-size: 3vw; margin-top: 0; white-space: normal;">
-                <span style="color: ${secondaryColor};">
-                  ${condition}&ensp;
-                  气压:${pressure}hPa&ensp;
-                  云量:${cloud}%&ensp;
-                  风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;
-                  能见度:${visibility}km&ensp;
-                  紫外线:${uv}级&ensp;
-                  空气质量: ${aqiCategory}
-                </span>
-            </div>
-        </div>
-        
         <div class="hourly-forecast-container" style="grid-template-columns: repeat(${columns}, ${columnWidth}vw);">
           <!-- 分钟温度连接线 Canvas -->
           <canvas class="temp-line-canvas temp-line-canvas-high" id="minutely-temp-canvas-${this._getInstanceId()}"></canvas>
@@ -2607,7 +2318,7 @@ class XiaoshiWeatherPhoneCard extends LitElement {
                   
                   <!-- 雨量填充矩形 -->
                   ${rainfall > 0 ? html`
-                    <div class="rainfall-fill" style="height: ${rainfallHeight}vw; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                    <div class="rainfall-fill" style="height: calc(${rainfallHeight}vw + 10px); opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                   ` : ''}
                 </div>
                 <div class="forecast-temp-null"></div>
@@ -2861,14 +2572,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     const theme = this._evaluateTheme();
     const textcolor = theme === 'on' ? 'rgba(0, 0, 0)' : 'rgba(255, 255, 255)';
     const backgroundColor = theme === 'on' ? 'rgba(50,50,50, 0.1)' : 'rgba(255, 255, 255, 0.1)';
-    const secondaryColorblue = theme === 'on' ? 'rgb(110, 190, 240)' : 'rgb(110, 190, 240)';
-    
-    const summary = this.entity?.attributes?.minutely_summary  || ''; 
-    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
-    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
-    const customTemp = this._getCustomTemperature();
-    const customHumidity = this._getCustomHumidity();
-    const feels_like  = this.entity?.attributes?.apparent_temperature || 0;
     
     // 获取AQI数值和等级
     const aqiValue = aqi.aqi || aqi.value || 0;
@@ -2899,26 +2602,6 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return html`
       <div class="aqi-details-card" style="background-color: ${backgroundColor}; border-radius: 2vw; padding: 2vw; margin-top: 1.5vw;">
         
-        <!-- 新增：天气概况与传感器信息 -->
-        ${summary !== '' ? html`
-          <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw; margin-bottom: 1vw;">
-            天气概况：${summary}&ensp;&ensp;
-          </div>
-        `: ''}
-        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
-          天气温度：${temperature}<span style="font-size: 0.8em;">℃</span>&ensp;&ensp;
-          天气湿度：${humidity}<span style="font-size: 0.8em;">%</span>&ensp;
-        </div>
-        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
-          体感温度：${feels_like}<span style="font-size: 0.8em;">℃</span>&ensp;&ensp;
-        </div>
-        <div style="color: ${secondaryColorblue}; font-size: 2.8vw; line-height: 3.5vw;">
-          ${customTemp !== null ? html`传感器温度：${customTemp}<span style="font-size: 0.8em">℃</span>&ensp;&ensp;`: ''}
-          ${customHumidity !== null ? html`传感器湿度：${customHumidity}<span style="font-size: 0.8em;">%</span>&ensp;`: ''}
-        </div>
-        
-        <div style="margin-bottom: 2vw;"></div>
-
         <!-- AQI总览 -->
         <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 0.5vw; padding: 0.5vw;  border-radius: 1.5vw;">
           <div style="text-align: center;">
@@ -4338,7 +4021,7 @@ class XiaoshiWeatherPadCard extends LitElement {
     return this._instanceId;
   }
 
-  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo = null) {
+  _drawTemperatureCurve(canvasId, points, color) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -4383,8 +4066,13 @@ class XiaoshiWeatherPadCard extends LitElement {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
+      // 开始绘制路径
+      ctx.beginPath();
+      
       const { CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
-      const canvasPoints = points.map((point) => {
+      
+      // 转换所有点为Canvas坐标
+      const canvasPoints = points.map((point, index) => {
         const x = (point.x / 100) * canvas.width;
         const y = (point.y / CONTAINER_HEIGHT_PX) * canvas.height;
         return { x, y };
@@ -4401,50 +4089,45 @@ class XiaoshiWeatherPadCard extends LitElement {
         return;
       }
       
-      const tension = 0.2;
-      const drawSegment = (startIndex, endIndexInclusive, dashed) => {
-        ctx.beginPath();
-        if (dashed) {
-          ctx.setLineDash([6, 12]);
-          ctx.globalAlpha = 0.6;
+      // 开始绘制平滑曲线，确保通过所有原始点
+      ctx.beginPath();
+      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+      
+      // 使用更保守的样条算法，减少曲线过度弯曲
+      const tension = 0.2; // 减小张力系数，避免过度弯曲
+      
+      for (let i = 0; i < canvasPoints.length - 1; i++) {
+        const p0 = canvasPoints[Math.max(0, i - 1)];
+        const p1 = canvasPoints[i];
+        const p2 = canvasPoints[i + 1];
+        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+        
+        // 计算控制点，限制控制点距离，避免过度弯曲
+        const dx1 = (p2.x - p0.x) * tension;
+        const dy1 = (p2.y - p0.y) * tension;
+        const dx2 = (p3.x - p1.x) * tension;
+        const dy2 = (p3.y - p1.y) * tension;
+        
+        // 限制控制点的垂直距离，防止曲线超出边界
+        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+        
+        const cp1x = p1.x + dx1;
+        const cp1y = p1.y + limitedDy1;
+        const cp2x = p2.x - dx2;
+        const cp2y = p2.y - limitedDy2;
+        
+        // 如果是第一段，使用二次贝塞尔
+        if (i === 0) {
+          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
         } else {
-          ctx.setLineDash([]);
-          ctx.globalAlpha = 1;
+          // 使用三次贝塞尔曲线，确保通过原始点
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
         }
-        ctx.moveTo(canvasPoints[startIndex].x, canvasPoints[startIndex].y);
-        for (let i = startIndex; i < endIndexInclusive; i++) {
-          const p0 = canvasPoints[Math.max(0, i - 1)];
-          const p1 = canvasPoints[i];
-          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
-          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-          const dx1 = (p2.x - p0.x) * tension;
-          const dy1 = (p2.y - p0.y) * tension;
-          const dx2 = (p3.x - p1.x) * tension;
-          const dy2 = (p3.y - p1.y) * tension;
-          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-          const cp1x = p1.x + dx1;
-          const cp1y = p1.y + limitedDy1;
-          const cp2x = p2.x - dx2;
-          const cp2y = p2.y - limitedDy2;
-          if (i === startIndex) {
-            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
-          } else {
-            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-          }
-        }
-        ctx.stroke();
-      };
-      if (dashedSegmentInfo && typeof dashedSegmentInfo.endIndex === 'number') {
-        const endIdx = Math.max(1, Math.min(canvasPoints.length - 1, dashedSegmentInfo.endIndex));
-        drawSegment(0, endIdx, true);
-        if (endIdx < canvasPoints.length - 1) {
-          drawSegment(endIdx, canvasPoints.length - 1, false);
-        }
-      } else {
-        drawSegment(0, canvasPoints.length - 1, false);
       }
+      
+      ctx.stroke();
     });
   }
 
@@ -4501,16 +4184,6 @@ class XiaoshiWeatherPadCard extends LitElement {
     const highTempData = this._generateTemperatureLine(forecastDays, extremes, true);
     const lowTempData = this._generateTemperatureLine(forecastDays, extremes, false);
     
-    // 检查是否需要虚线（如果有昨天的数据，则第一段为虚线）
-    let dashedSegmentInfo = null;
-    if (forecastDays.length > 0) {
-        const firstDay = forecastDays[0];
-        const weekday = this._getWeekday(firstDay.datetime);
-        if (weekday === '昨天') {
-            dashedSegmentInfo = { endIndex: 1 };
-        }
-    }
-    
     // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const highCanvasId = `high-temp-canvas-${instanceId}`;
@@ -4519,8 +4192,8 @@ class XiaoshiWeatherPadCard extends LitElement {
     // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
-        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)', dashedSegmentInfo);
-        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)', dashedSegmentInfo);
+        this._drawTemperatureCurve(highCanvasId, highTempData.points, 'rgba(255, 87, 34)');
+        this._drawTemperatureCurve(lowCanvasId, lowTempData.points, 'rgba(33, 150, 243)');
       }, 50);
     });
     
@@ -4548,7 +4221,7 @@ class XiaoshiWeatherPadCard extends LitElement {
 
           // 如果是昨天，设置透明度 
           const isYesterday = weekday !== '昨天' && weekday !== '前天';
-          const opacity = isYesterday ? 1 : 0.3;
+          const opacity = isYesterday ? 1 : 0.5;
           const theme = this._evaluateTheme();
           const hightbackground = isYesterday ? 
                 'linear-gradient(to bottom,rgba(255, 87, 34) 0%,rgba(255, 152, 0) 100%)':
@@ -4573,7 +4246,7 @@ class XiaoshiWeatherPadCard extends LitElement {
           const rainfall = parseFloat(day.native_precipitation) || 0;
           
           // 计算雨量矩形高度和位置
-          const RAINFALL_MAX = 50; // 最大雨量25mm
+          const RAINFALL_MAX = 25; // 最大雨量25mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125); // 最大高度125px（到日期下面）
 
           return html`
@@ -4606,7 +4279,7 @@ class XiaoshiWeatherPadCard extends LitElement {
                 
                 <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight + 10}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
@@ -4661,28 +4334,6 @@ class XiaoshiWeatherPadCard extends LitElement {
     const update_time = this.entity.attributes?.update_time || '未知时间';
     const sunRise = this.entity.attributes?.sun.sunrise || '';
     const sunSet = this.entity.attributes?.sun.sunset || '';
-    
-    // 获取额外属性
-    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
-    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
-    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
-    const windDir = this.entity.attributes?.winddir || '';
-    
-    // 获取UV指数
-    let uv = 0;
-    if (this.entity.attributes?.air_indices) {
-        const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
-        if (uvIndex) {
-            uv = uvIndex.level || uvIndex.category || 0;
-        }
-    }
-    
-    // 获取AQI等级
-    let aqiCategory = '未知';
-    if (this.entity.attributes?.aqi) {
-        aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
-    }
-
     // 获取颜色
     const fgColor = theme === 'on' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)';
     const bgColor = this.config.card_bg_color || (theme === 'on' ? 'rgb(255, 255, 255)' : 'rgb(50, 50, 50)');
@@ -4719,7 +4370,7 @@ class XiaoshiWeatherPadCard extends LitElement {
               <!-- 第二行：天气信息 + AQI -->
               <div class="weather-row">
                 <div class="weather-info">
-                  <span style="color: ${secondaryColor}; font-size: 15px;">${condition} 
+                  <span style="color: ${secondaryColor};">${condition} 
                     <span class="wind-direction">${this._getWindDirectionIcon(windBearing)}</span>
                     ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
                     ${pressure}<span style="font-size: 0.6em;">hPa </span>
@@ -4732,7 +4383,7 @@ class XiaoshiWeatherPadCard extends LitElement {
               <!-- 中间位置的右侧按钮（绝对定位于weather-right中） -->
               <div class="weather-right-buttons" style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; align-items: center; gap: 10px">
                 ${hassairindices ? html`
-                  <button class="toggle-btn daily-mode" style="background: rgba(5, 155, 10);" @click="${() => this._toggleIndicesDetails()}">
+                  <button class="toggle-btn daily-mode" style="background: rgb(51, 122, 159);" @click="${() => this._toggleIndicesDetails()}">
                     指数
                   </button>
                 ` : ''}
@@ -4789,13 +4440,7 @@ class XiaoshiWeatherPadCard extends LitElement {
                 </div>
               </div>
               <div class="modal-body">
-                ${this._hourlyModalMode === 'minutely' 
-                  ? (typeof this._renderMinutelyForecast === 'function' 
-                      ? this._renderMinutelyForecast() 
-                      : html`<xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>`)
-                  : (typeof this._renderHourlyForecast === 'function' 
-                      ? this._renderHourlyForecast() 
-                      : html`<xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>`)}
+                <xiaoshi-hourly-weather-card .hass=${this.hass} .config=${this.config} .entity=${this.entity} .forecastMode=${this._hourlyModalMode}></xiaoshi-hourly-weather-card>
               </div>
             </div>
           </div>
@@ -5080,7 +4725,2010 @@ class XiaoshiWeatherPadCard extends LitElement {
     });
   }
 }
-customElements.define('xiaoshi-weather-pad-card', XiaoshiWeatherPadCard);
+
+class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
+  static get properties() {
+    return {
+      hass: { type: Object },
+      config: { type: Object },
+      entity: { type: Object },
+      selectedEntityIndex: { type: Number },
+      forecastMode: { type: String },
+      selectedIndexDetail: { type: Object },
+      selectedWarningDetail: { type: Array },
+      _entityDragStartX: { type: Number }
+    };
+  }
+
+  static get styles() {
+    return css`
+      :host {
+        display: inline-block;
+        width: auto;
+        inline-size: auto;
+        max-width: 96vw;
+        margin: 0 auto;
+        background: transparent;
+        --weather-glass-bg: rgba(248, 252, 255, 0.54);
+        --weather-glass-strong: rgb(127 194 229 / 72%);
+        --weather-glass-soft: rgba(255, 255, 255, 0.28);
+        --weather-border: rgba(255, 255, 255, 0.58);
+        --weather-border-soft: rgba(255, 255, 255, 0.28);
+        --weather-text: rgba(26, 43, 62, 0.94);
+        --weather-muted: rgba(58, 77, 97, 0.78);
+        --weather-faint: rgb(255 255 255 / 77%);
+        --weather-blue: #4aa7ff;
+        --weather-cyan: #56d5e9;
+        --weather-orange: #ff9b54;
+        --weather-green: #46c878;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+        color: var(--weather-text);
+        font-weight: 350;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .weather-shell {
+        position: relative;
+        width: var(--weather-card-width, min(calc(96vw - 6px), 1254px));
+        margin: 0 auto;
+        overflow: hidden;
+        border-radius: 28px;
+        padding: 18px;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(225, 242, 255, 0.38)),
+          radial-gradient(circle at 12% 0%, rgba(116, 204, 255, 0.24), transparent 38%),
+          radial-gradient(circle at 88% 12%, rgba(255, 185, 112, 0.18), transparent 34%);
+        border: 1px solid var(--weather-border);
+        box-shadow: 0 28px 70px rgba(18, 38, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+        backdrop-filter: blur(30px) saturate(1.45);
+        -webkit-backdrop-filter: blur(30px) saturate(1.45);
+        isolation: isolate;
+      }
+
+      .weather-shell::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border-radius: inherit;
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.44), transparent 35%, rgba(255, 255, 255, 0.18));
+        z-index: -1;
+      }
+
+      .weather-shell.dark {
+        --weather-glass-bg: rgba(24, 35, 52, 0.58);
+        --weather-glass-strong: rgb(127 194 229 / 72%);
+        --weather-glass-soft: rgba(255, 255, 255, 0.12);
+        --weather-border: rgba(255, 255, 255, 0.24);
+        --weather-border-soft: rgba(255, 255, 255, 0.14);
+        --weather-text: rgba(248, 252, 255, 0.96);
+        --weather-muted: rgba(223, 235, 247, 0.74);
+        --weather-faint: rgb(255 255 255 / 77%);
+        background: rgba(31, 148, 191, 0.6);
+        box-shadow: 0 28px 70px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      }
+
+      .weather-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 16px;
+        align-items: start;
+      }
+
+      .weather-main {
+        min-width: 0;
+      }
+
+      .glass {
+        background: var(--weather-glass-soft);
+        border: 1px solid #145f864d;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 12px 26px rgba(21, 47, 76, 0.12);
+        backdrop-filter: blur(18px) saturate(1.4);
+        -webkit-backdrop-filter: blur(18px) saturate(1.4);
+      }
+
+      .entity-switcher {
+        position: relative;
+        display: flex;
+        gap: 6px;
+        width: fit-content;
+        max-width: 100%;
+        padding: 4px;
+        margin-bottom: 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.26);
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        touch-action: pan-y;
+        overflow: hidden;
+      }
+
+      .switcher-indicator {
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        left: 4px;
+        border-radius: 999px;
+        background: var(--weather-glass-strong);
+        box-shadow: 0 8px 18px rgba(25, 66, 108, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+        transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+        pointer-events: none;
+      }
+
+      .entity-pill,
+      .segment {
+        border: 0;
+        cursor: pointer;
+        color: var(--weather-muted);
+        background: transparent;
+        white-space: nowrap;
+        transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      }
+
+      .entity-pill {
+        position: relative;
+        z-index: 1;
+        flex: 1 1 0;
+        min-width: 96px;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        padding: 7px 13px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 350;
+      }
+
+      .entity-pill.active,
+      .segment.active {
+        color: var(--weather-text);
+      }
+
+      .entity-pill:active,
+      .segment:active,
+      .icon-button:active,
+      .index-row:active {
+        transform: scale(0.98);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .current {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .current-icon {
+        width: 104px;
+        height: 104px;
+        padding: 2px;
+      }
+
+      .current-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        filter: drop-shadow(0 12px 20px rgba(255, 188, 70, 0.3));
+      }
+
+      .temp-line {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .temperature {
+        font-size: 72px;
+        line-height: 0.95;
+        letter-spacing: 0;
+        font-weight: 350;
+        font-variant-numeric: tabular-nums;
+        color: rgba(255, 255, 255, 0.98);
+        text-shadow: 0 10px 24px rgba(19, 30, 48, 0.22);
+      }
+
+      .condition {
+        font-size: 30px;
+        font-weight: 350;
+        color: rgba(255, 255, 255, 0.98);
+        text-shadow: 0 8px 20px rgba(19, 30, 48, 0.18);
+      }
+
+      .city-line,
+      .meta-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--weather-muted);
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      .city-line {
+        margin-top: 6px;
+        color: var(--weather-text);
+        font-weight: 350;
+      }
+
+      .city-line span,
+      .meta-line span {
+        min-width: 0;
+        white-space: normal;
+      }
+
+      .right-summary {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
+        gap: 10px;
+        min-width: 248px;
+        width: 248px;
+        max-width: 248px;
+      }
+
+      .sun-chip,
+      .warning-chip,
+      .summary-chip {
+        width: 100%;
+        border-radius: 22px;
+        font-size: 12px;
+        font-weight: 350;
+        color: var(--weather-muted);
+        letter-spacing: 0;
+      }
+
+      .sun-chip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0;
+        min-height: 72px;
+        padding: 10px 0;
+        background: rgba(255, 255, 255, 0.115);
+        border-color: rgba(255, 255, 255, 0.18);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 8px 18px rgba(9, 26, 45, 0.1);
+      }
+
+      .warning-chip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 72px;
+        padding: 10px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        cursor: pointer;
+        background: var(--warning-chip-bg, rgba(255, 255, 255, 0.135));
+        color: var(--warning-chip-fg, rgba(248, 252, 255, 0.96));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 8px 18px rgba(9, 26, 45, 0.1);
+      }
+
+      .warning-chip:disabled {
+        cursor: default;
+        opacity: 0.85;
+      }
+
+      .warning-chip.has-warning {
+        background: var(--warning-chip-bg, rgba(255, 137, 88, 0.13));
+        border-color: var(--warning-chip-border, rgba(255, 145, 92, 0.26));
+      }
+
+      .sun-chip ha-icon {
+        --mdc-icon-size: 28px;
+        color: rgba(238, 246, 252, 0.88);
+        opacity: 0.94;
+      }
+
+      .warning-chip ha-icon {
+        --mdc-icon-size: 18px;
+        opacity: 0.92;
+        color: var(--warning-chip-fg, rgba(248, 252, 255, 0.96));
+      }
+
+      .sun-chip span,
+      .warning-chip span {
+        color: inherit;
+        font-size: 11.5px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .sun-slot {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        padding: 0 14px;
+      }
+
+      .sun-slot + .sun-slot {
+        border-left: 1px solid rgba(255, 255, 255, 0.2);
+        padding-left: 14px;
+        margin-left: 0;
+      }
+
+      .sun-slot-label {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        color: rgba(234, 244, 252, 0.72);
+        font-size: 11px;
+      }
+
+      .sun-slot-label span {
+        color: inherit;
+        font-size: 11px;
+      }
+
+      .sun-slot-copy {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .sun-slot-time {
+        color: rgba(255, 255, 255, 0.98);
+        font-size: 20px;
+        line-height: 1;
+        letter-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .warning-chip-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .warning-chip-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--warning-chip-fg, rgba(248, 252, 255, 0.96));
+      }
+
+      .warning-chip-meta span {
+        white-space: nowrap;
+      }
+
+      .warning-chip-title {
+        color: var(--warning-chip-fg, rgba(248, 252, 255, 0.94));
+        font-size: 14px;
+        line-height: 1.15;
+      }
+
+      .warning-chip-subtitle {
+        color: var(--warning-chip-subtle, rgba(235, 242, 249, 0.72));
+        font-size: 10.5px;
+        line-height: 1.25;
+      }
+
+      .warning-chip-count {
+        flex: 0 0 auto;
+        align-self: center;
+        min-width: 38px;
+        padding: 7px 9px;
+        border-radius: 999px;
+        color: var(--warning-chip-fg, rgba(249, 252, 255, 0.96));
+        background: var(--warning-chip-count-bg, rgba(255, 255, 255, 0.1));
+        text-align: center;
+        font-size: 12px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      ha-icon {
+        --mdc-icon-size: 16px;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(128px, 1fr));
+        gap: 10px;
+        margin: 14px 0;
+      }
+
+      .metric {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 16px;
+      }
+
+      .metric-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        color: var(--metric-color, var(--weather-cyan));
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .metric-icon ha-icon {
+        --mdc-icon-size: 17px;
+      }
+
+      .metric-label {
+        font-size: 11px;
+        color: var(--weather-faint);
+        white-space: nowrap;
+      }
+
+      .metric-value {
+        margin-top: 3px;
+        font-size: 14px;
+        font-weight: 350;
+        color: var(--weather-text);
+        white-space: normal;
+        overflow-wrap: anywhere;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .forecast-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin: 10px 0 9px;
+      }
+
+      .segments {
+        position: relative;
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .segments-indicator {
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        left: 4px;
+        border-radius: 999px;
+        background: var(--weather-glass-strong);
+        box-shadow: 0 8px 18px rgba(25, 66, 108, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+        transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+        pointer-events: none;
+      }
+
+      .segment {
+        position: relative;
+        z-index: 1;
+        flex: 1 1 0;
+        min-width: 72px;
+        padding: 8px 16px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 350;
+      }
+
+      .minutely-summary {
+        flex: 1;
+        min-width: 0;
+        text-align: right;
+        color: var(--weather-muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .forecast-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x;
+        cursor: grab;
+        animation: forecast-slide-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .forecast-scroll::-webkit-scrollbar {
+        display: none;
+      }
+
+      .forecast-scroll:active {
+        cursor: grabbing;
+      }
+
+      .forecast-scroll.dragging {
+        cursor: grabbing;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .forecast-grid {
+        position: relative;
+        display: grid;
+        gap: 8px;
+        min-width: max-content;
+        padding-bottom: 2px;
+      }
+
+      .forecast-card {
+        position: relative;
+        display: grid;
+        grid-template-rows: 22px 19px 132px 20px 40px 34px;
+        width: 112px;
+        min-height: 270px;
+        padding: 10px 9px;
+        border-radius: 18px;
+        text-align: center;
+        overflow: hidden;
+        background: var(--weather-glass-soft);
+        border: 1px solid #145f864d;
+        transition: none;
+      }
+
+      .forecast-card.current-day {
+        background: rgba(255, 255, 255, 0.5);
+        border-color: rgba(255, 255, 255, 0.62);
+      }
+
+      .forecast-time,
+      .forecast-date,
+      .rain-label,
+      .forecast-wind {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .forecast-time {
+        font-size: 13px;
+        font-weight: 350;
+        color: rgba(255, 255, 255, 0.98);
+      }
+
+      .forecast-date {
+        color: rgba(255, 255, 255, 0.92);
+        font-size: 11px;
+      }
+
+      .temp-zone {
+        position: relative;
+        margin: 4px 0;
+      }
+
+      .rain-fill {
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        bottom: 0;
+        border-radius: 999px 999px 10px 10px;
+        background: linear-gradient(179deg, rgb(50 200 74 / 20%), rgb(12 183 206 / 94%));
+      }
+
+      .temp-dot {
+        position: absolute;
+        left: 50%;
+        width: 8px;
+        height: 8px;
+        margin-left: -4px;
+        border-radius: 999px;
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.44);
+        z-index: 3;
+      }
+
+      .temp-dot.high,
+      .temp-dot.hourly {
+        background: var(--weather-orange);
+      }
+
+      .temp-dot.low {
+        background: var(--weather-blue);
+      }
+
+      .temp-dot.minutely {
+        background: var(--weather-green);
+      }
+
+      .temp-label {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 12px;
+        font-weight: 350;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .temp-label.high,
+      .temp-label.hourly {
+        color: var(--weather-orange);
+        top: -19px;
+      }
+
+      .temp-label.low {
+        color: var(--weather-blue);
+        top: 8px;
+      }
+
+      .temp-label.minutely {
+        color: var(--weather-green);
+        top: -19px;
+      }
+
+      .rain-label {
+        align-self: center;
+        justify-self: center;
+        max-width: 100%;
+        min-height: 18px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        color: rgba(0, 30, 39, 1);
+        background: rgba(79, 203, 236, 0.2);
+        font-size: 11px;
+        font-weight: 350;
+      }
+
+      .forecast-scroll.mode-forward {
+        animation-name: forecast-slide-forward;
+      }
+
+      .forecast-scroll.mode-backward {
+        animation-name: forecast-slide-backward;
+      }
+
+      @keyframes forecast-slide-in {
+        0% {
+          transform: translateX(12px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      @keyframes forecast-slide-forward {
+        0% {
+          transform: translateX(18px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      @keyframes forecast-slide-backward {
+        0% {
+          transform: translateX(-18px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      .forecast-icon {
+        width: 34px;
+        height: 34px;
+        justify-self: center;
+        align-self: center;
+      }
+
+      .forecast-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .forecast-wind {
+        color: var(--weather-muted);
+        font-size: 12px;
+        font-weight: 350;
+        white-space: normal;
+        line-height: 1.25;
+      }
+
+      .curve-canvas {
+        position: absolute;
+        top: 58px;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 132px;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .icon-button {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 1px solid var(--weather-border-soft);
+        border-radius: 15px;
+        color: var(--weather-text);
+        background: var(--weather-glass-strong);
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(21, 47, 76, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.64);
+      }
+
+      .inspector {
+        position: relative;
+        width: 100%;
+        min-height: 0;
+        z-index: 12;
+        padding: 10px;
+        border-radius: 22px;
+        overflow: hidden;
+        background:
+          linear-gradient(155deg, rgba(236, 246, 255, 0.78), rgba(201, 220, 236, 0.72)),
+          rgba(238, 247, 255, 0.76);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 18px 40px rgba(9, 28, 48, 0.2);
+      }
+
+      .weather-shell.dark .inspector {
+        background:
+          linear-gradient(77deg, rgb(49 87 129 / 72%), rgb(83 132 192 / 86%)),
+          rgb(48 192 186 / 89%);
+        box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%), 0 18px 40px rgb(2 9 15 / 20%);
+      }
+
+      .inspector-content {
+        display: grid;
+        gap: 8px;
+        height: 100%;
+        overflow: hidden;
+        scrollbar-width: none;
+      }
+
+      .inspector-content::-webkit-scrollbar {
+        display: none;
+      }
+
+      .aqi-hero {
+        position: relative;
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        padding: 14px 14px 10px;
+        border-radius: 20px 20px 0 0;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08)),
+          rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-bottom: 0;
+      }
+
+      .aqi-gauge {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 92px;
+        height: 92px;
+      }
+
+      .aqi-gauge::before {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border-radius: 50%;
+        background:
+          conic-gradient(from 218deg, var(--aqi-color, #46c878) 0deg var(--aqi-progress, 0deg), rgba(255, 255, 255, 0.16) var(--aqi-progress, 0deg) 360deg);
+        -webkit-mask: radial-gradient(circle, transparent 0 56%, #000 57% 100%);
+        mask: radial-gradient(circle, transparent 0 56%, #000 57% 100%);
+        filter: drop-shadow(0 0 10px color-mix(in srgb, var(--aqi-color, #46c878) 42%, transparent));
+      }
+
+      .aqi-gauge::after {
+        content: "";
+        position: absolute;
+        inset: 18px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.1);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
+      }
+
+      .aqi-ring {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        text-align: center;
+      }
+
+      .aqi-value-big {
+        font-size: 30px;
+        line-height: 1;
+        font-weight: 350;
+        color: var(--weather-text);
+      }
+
+      .aqi-unit {
+        margin-top: 4px;
+        color: var(--weather-muted);
+        font-size: 12px;
+        font-weight: 350;
+      }
+
+      .aqi-title {
+        padding-right: 20px;
+        font-size: 17px;
+        font-weight: 350;
+        white-space: nowrap;
+      }
+
+      .aqi-subtitle {
+        margin-top: 6px;
+        color: var(--weather-muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .aqi-subtitle strong {
+        display: block;
+        color: var(--weather-text);
+        font-size: 12px;
+        font-weight: 350;
+        white-space: nowrap;
+      }
+
+      .aqi-subtitle span {
+        display: block;
+      }
+
+      .aqi-leaf {
+        position: absolute;
+        right: 14px;
+        top: 16px;
+        color: var(--aqi-color, #46c878);
+        opacity: 0.8;
+      }
+
+      .aqi-source {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 10px 9px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-top: 0;
+        border-radius: 0 0 18px 18px;
+        color: var(--weather-faint);
+        font-size: 11px;
+      }
+
+      .pollutants {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        margin-top: 0;
+        padding: 6px 2px;
+        border-left: 1px solid rgba(255, 255, 255, 0.18);
+        border-right: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .pollutant {
+        min-width: 0;
+        padding: 6px 8px;
+        border-radius: 0;
+        border-right: 1px solid rgba(255, 255, 255, 0.16);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .pollutant:nth-child(3n) {
+        border-right: 0;
+      }
+
+      .pollutant:nth-last-child(-n + 3) {
+        border-bottom: 0;
+      }
+
+      .pollutant-name {
+        color: var(--weather-faint);
+        font-size: 11px;
+        font-weight: 350;
+      }
+
+      .pollutant-value {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        margin-top: 3px;
+        font-size: 18px;
+        font-weight: 350;
+        font-variant-numeric: tabular-nums;
+        color: rgba(255, 255, 255, 0.98);
+      }
+
+      .pollutant-unit {
+        color: var(--aqi-color, #46c878);
+        font-size: 10px;
+        font-weight: 350;
+      }
+
+      .index-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .inspector-section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin: 4px 2px 4px;
+        color: var(--weather-text);
+        font-size: 13px;
+        font-weight: 350;
+      }
+
+      .inspector-section-title span:last-child {
+        color: var(--weather-faint);
+        font-size: 11px;
+        font-weight: 350;
+      }
+
+      .index-row {
+        width: 100%;
+        min-height: 44px;
+        padding: 7px 8px;
+        border-radius: 14px;
+        border: 1px solid var(--weather-border-soft);
+        color: var(--weather-text);
+        text-align: left;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .index-row-top {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) minmax(42px, auto);
+        align-items: center;
+        gap: 6px;
+      }
+
+      .index-icon {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        color: var(--index-color, var(--weather-cyan));
+        background: color-mix(in srgb, var(--index-color, var(--weather-cyan)) 20%, transparent);
+      }
+
+      .index-icon ha-icon {
+        --mdc-icon-size: 15px;
+      }
+
+      .index-name,
+      .index-category {
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .index-name {
+        font-size: 12px;
+        font-weight: 350;
+      }
+
+      .index-category {
+        max-width: none;
+        color: var(--index-color, var(--weather-green));
+        font-size: 11px;
+        font-weight: 350;
+      }
+
+      .index-preview {
+        display: none;
+        margin-top: 5px;
+        color: var(--weather-muted);
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
+      .detail-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(18, 31, 46, 0.22);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+
+      .detail-dialog {
+        width: min(380px, 92%);
+        max-height: 82%;
+        overflow: auto;
+        padding: 16px;
+        border-radius: 24px;
+        background: rgb(49 89 158 / 53%);
+      }
+
+      .detail-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .detail-title {
+        font-size: 19px;
+        font-weight: 350;
+        color: rgba(241,241,241,0.94);
+      }
+
+      .detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 10px;
+      }
+
+      .detail-chip {
+        padding: 5px 8px;
+        border-radius: 999px;
+        color: var(--weather-muted);
+        font-size: 12px;
+        font-weight: 350;
+      }
+
+      .detail-text {
+        margin-top: 14px;
+        color: var(--weather-text);
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .warning-dialog {
+        width: min(520px, 94%);
+        max-height: 82%;
+      }
+
+      .warning-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .warning-item-v2 {
+        padding: 12px 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .warning-item-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .warning-item-title {
+        color: var(--warning-color, #ff8a54);
+        font-size: 14px;
+        font-weight: 350;
+      }
+
+      .warning-item-time,
+      .warning-item-text {
+        color: var(--weather-muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .empty-state {
+        padding: 18px 10px;
+        color: var(--weather-muted);
+        text-align: center;
+        font-size: 12px;
+      }
+
+      @media (max-width: 680px) {
+        .weather-shell {
+          width: 94vw;
+          padding: 12px;
+          border-radius: 24px;
+        }
+
+        .weather-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          grid-template-columns: 1fr;
+        }
+
+        .right-summary {
+          align-items: flex-start;
+          min-width: 0;
+          width: 100%;
+          max-width: none;
+        }
+
+        .metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .inspector {
+          width: 100%;
+        }
+      }
+    `;
+  }
+
+  constructor() {
+    super();
+    this.selectedEntityIndex = 0;
+    this.forecastMode = 'daily';
+    this.selectedIndexDetail = null;
+    this.selectedWarningDetail = null;
+    this._entityDragStartX = 0;
+    this._entityTransitionDirection = 'forward';
+    this._forecastTransitionDirection = 'forward';
+    this._forecastDragPointerId = null;
+    this._forecastDragStartX = 0;
+    this._forecastDragStartScrollLeft = 0;
+    this._forecastDragTarget = null;
+    this._boundHandleKeydown = this._handleKeydown.bind(this);
+    this._boundHandleResize = this._handleResize.bind(this);
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener('keydown', this._boundHandleKeydown);
+    window.addEventListener('resize', this._boundHandleResize);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener('keydown', this._boundHandleKeydown);
+    window.removeEventListener('resize', this._boundHandleResize);
+    super.disconnectedCallback();
+  }
+
+  updated(changedProperties) {
+    super.updated(changedProperties);
+    if (changedProperties.has('config') || changedProperties.has('hass') || changedProperties.has('selectedEntityIndex')) {
+      this._updateActiveEntity();
+    }
+    if (changedProperties.has('forecastMode') || changedProperties.has('entity') || changedProperties.has('hass')) {
+      this.updateComplete.then(() => {
+        requestAnimationFrame(() => {
+          this._syncSegmentIndicators();
+          this._drawForecastCurves();
+        });
+      });
+    }
+    if (changedProperties.has('selectedEntityIndex') || changedProperties.has('forecastMode') || changedProperties.has('config') || changedProperties.has('hass')) {
+      this.updateComplete.then(() => {
+        requestAnimationFrame(() => this._syncSegmentIndicators());
+      });
+    }
+  }
+
+  _handleResize() {
+    requestAnimationFrame(() => {
+      this._syncSegmentIndicators();
+      this._drawForecastCurves();
+    });
+  }
+
+  _handleKeydown(e) {
+    if (e.key === 'Escape' && this.selectedIndexDetail) {
+      this.selectedIndexDetail = null;
+      return;
+    }
+    if (e.key === 'Escape' && this.selectedWarningDetail) {
+      this.selectedWarningDetail = null;
+    }
+  }
+
+  _getConfiguredEntities() {
+    const configured = Array.isArray(this.config?.entities) && this.config.entities.length > 0
+      ? this.config.entities
+      : [this.config?.entity].filter(Boolean);
+    return configured.filter(Boolean);
+  }
+
+  _getEntityName(entityId, index) {
+    if (Array.isArray(this.config?.entity_names) && this.config.entity_names[index]) {
+      return this.config.entity_names[index];
+    }
+    return this.hass?.states?.[entityId]?.attributes?.friendly_name || entityId || `天气 ${index + 1}`;
+  }
+
+  _updateActiveEntity() {
+    if (!this.hass || !this.config) return;
+    const entities = this._getConfiguredEntities();
+    if (entities.length === 0) return;
+    const defaultIndex = Number.isInteger(this.config.default_entity_index) ? this.config.default_entity_index : 0;
+    if (!this._defaultIndexApplied) {
+      this.selectedEntityIndex = Math.max(0, Math.min(defaultIndex, entities.length - 1));
+      this._defaultIndexApplied = true;
+    }
+    if (this.selectedEntityIndex >= entities.length) {
+      this.selectedEntityIndex = 0;
+    }
+    this.entity = this.hass.states[entities[this.selectedEntityIndex]];
+  }
+
+  _selectEntity(index) {
+    const entities = this._getConfiguredEntities();
+    if (index < 0 || index >= entities.length || index === this.selectedEntityIndex) return;
+    this._entityTransitionDirection = index > this.selectedEntityIndex ? 'forward' : 'backward';
+    this.selectedEntityIndex = index;
+    this.selectedIndexDetail = null;
+    this._updateActiveEntity();
+  }
+
+  _handleEntityPointerDown(e) {
+    this._entityDragStartX = e.clientX || 0;
+  }
+
+  _handleEntityPointerUp(e) {
+    const delta = (e.clientX || 0) - this._entityDragStartX;
+    if (Math.abs(delta) < 36) return;
+    const entities = this._getConfiguredEntities();
+    const direction = delta < 0 ? 1 : -1;
+    const next = Math.max(0, Math.min(this.selectedEntityIndex + direction, entities.length - 1));
+    this._selectEntity(next);
+  }
+
+  _setForecastMode(mode) {
+    if (mode === this.forecastMode) return;
+    const order = ['daily', 'hourly', 'minutely'];
+    this._forecastTransitionDirection = order.indexOf(mode) > order.indexOf(this.forecastMode) ? 'forward' : 'backward';
+    this.forecastMode = mode;
+    this.selectedIndexDetail = null;
+  }
+
+  _syncSegmentIndicators() {
+    this._syncIndicator('.entity-switcher', '.entity-pill.active', '.switcher-indicator');
+    this._syncIndicator('.segments', '.segment.active', '.segments-indicator');
+  }
+
+  _syncIndicator(containerSelector, activeSelector, indicatorSelector) {
+    const root = this.renderRoot;
+    if (!root) return;
+    const container = root.querySelector(containerSelector);
+    const active = root.querySelector(activeSelector);
+    const indicator = root.querySelector(indicatorSelector);
+    if (!container || !active || !indicator) return;
+    const baseLeft = indicator.offsetLeft || 0;
+    const left = active.offsetLeft - container.scrollLeft - baseLeft;
+    const width = active.offsetWidth;
+    indicator.style.width = `${width}px`;
+    indicator.style.transform = `translateX(${left}px)`;
+  }
+
+  _handleForecastPointerDown(e) {
+    const scroll = e.currentTarget;
+    if (!scroll) return;
+    this._forecastDragPointerId = e.pointerId;
+    this._forecastDragStartX = e.clientX;
+    this._forecastDragStartScrollLeft = scroll.scrollLeft;
+    this._forecastDragTarget = scroll;
+    scroll.classList.add('dragging');
+    if (scroll.setPointerCapture) {
+      scroll.setPointerCapture(e.pointerId);
+    }
+  }
+
+  _handleForecastPointerMove(e) {
+    if (this._forecastDragPointerId !== e.pointerId || !this._forecastDragTarget) return;
+    const delta = e.clientX - this._forecastDragStartX;
+    this._forecastDragTarget.scrollLeft = this._forecastDragStartScrollLeft - delta;
+    e.preventDefault();
+  }
+
+  _handleForecastPointerEnd(e) {
+    if (this._forecastDragPointerId !== e.pointerId || !this._forecastDragTarget) return;
+    const scroll = this._forecastDragTarget;
+    scroll.classList.remove('dragging');
+    if (scroll.releasePointerCapture) {
+      try {
+        scroll.releasePointerCapture(e.pointerId);
+      } catch (error) {
+      }
+    }
+    this._forecastDragPointerId = null;
+    this._forecastDragTarget = null;
+  }
+
+  _getHighestWarningLevel(warnings) {
+    if (!Array.isArray(warnings) || warnings.length === 0) return '';
+    const priority = ['红色', '橙色', '黄色', '蓝色'];
+    let level = '';
+    for (const item of warnings) {
+      const currentLevel = item?.level || '';
+      if (!currentLevel) continue;
+      if (!level || priority.indexOf(currentLevel) < priority.indexOf(level)) {
+        level = currentLevel;
+      }
+    }
+    return level;
+  }
+
+  _getWarningChipTheme(warnings) {
+    const level = this._getHighestWarningLevel(warnings);
+    if (!level) {
+      return {
+        bg: 'rgba(255, 255, 255, 0.135)',
+        border: 'rgba(255, 255, 255, 0.2)',
+        fg: 'rgba(248, 252, 255, 0.96)',
+        subtle: 'rgba(235, 242, 249, 0.72)',
+        countBg: 'rgba(255, 255, 255, 0.1)'
+      };
+    }
+    const bg = this._getWarningColorForLevel(level);
+    const isYellow = level === '黄色';
+    return {
+      bg,
+      border: isYellow ? 'rgba(92, 72, 8, 0.26)' : 'rgba(255, 255, 255, 0.22)',
+      fg: isYellow ? 'rgba(40, 31, 6, 0.96)' : 'rgba(255, 255, 255, 0.98)',
+      subtle: isYellow ? 'rgba(66, 54, 11, 0.8)' : 'rgba(244, 248, 252, 0.86)',
+      countBg: isYellow ? 'rgba(255, 255, 255, 0.32)' : 'rgba(0, 0, 0, 0.14)'
+    };
+  }
+
+  _formatValue(value, suffix = '', fallback = '--') {
+    if (value === undefined || value === null || value === '') return fallback;
+    return `${value}${suffix}`;
+  }
+
+  _formatToShanghaiTime(value) {
+    if (!value) return '--';
+    try {
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return String(value).replace('T', ' ').replace('Z', '');
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(parsed).replace(/\//g, '-');
+    } catch (error) {
+      return String(value).replace('T', ' ').replace('Z', '');
+    }
+  }
+
+  _formatTemp(value) {
+    const formatted = this._formatTemperature(value);
+    return formatted === undefined || formatted === null || formatted === '' ? '--' : formatted;
+  }
+
+  _getRelativeTime(updateTime) {
+    if (!updateTime || updateTime === '未知时间') return '数据更新时间：未知';
+    try {
+      const normalized = String(updateTime).includes(' ')
+        ? String(updateTime).replace(' ', 'T')
+        : String(updateTime);
+      const updateDate = new Date(normalized);
+      if (Number.isNaN(updateDate.getTime())) return `数据更新时间：${updateTime}`;
+      const diffMinutes = Math.max(0, Math.floor((Date.now() - updateDate.getTime()) / 60000));
+      if (diffMinutes < 1) return '数据更新时间：刚刚';
+      if (diffMinutes < 60) return `数据更新时间：${diffMinutes}分钟前`;
+      const diffHours = Math.floor(diffMinutes / 60);
+      if (diffHours < 24) return `数据更新时间：${diffHours}小时前`;
+      return `数据更新时间：${Math.floor(diffHours / 24)}天前`;
+    } catch (error) {
+      return `数据更新时间：${updateTime}`;
+    }
+  }
+
+  _getForecast(mode = this.forecastMode) {
+    const attrs = this.entity?.attributes || {};
+    if (mode === 'hourly') return Array.isArray(attrs.hourly_forecast) ? attrs.hourly_forecast.slice(0, 24) : [];
+    if (mode === 'minutely') return Array.isArray(attrs.minutely_forecast) ? attrs.minutely_forecast.slice(0, 24) : [];
+    const columns = this.config?.columns || 7;
+    return Array.isArray(attrs.daily_forecast) ? attrs.daily_forecast.slice(0, columns) : [];
+  }
+
+  _getTemperatureRange(data, mode = this.forecastMode) {
+    const temps = [];
+    data.forEach(item => {
+      if (mode === 'daily') {
+        temps.push(parseFloat(item.native_temperature), parseFloat(item.native_temp_low));
+      } else {
+        temps.push(parseFloat(item.native_temperature));
+      }
+    });
+    const clean = temps.filter(value => !Number.isNaN(value));
+    if (clean.length === 0) return { min: 0, max: 1, range: 1 };
+    const min = Math.min(...clean);
+    const max = Math.max(...clean);
+    return { min, max, range: Math.max(max - min, 1) };
+  }
+
+  _tempTop(value, range) {
+    const temp = parseFloat(value);
+    if (Number.isNaN(temp)) return 58;
+    const top = ((range.max - temp) / range.range) * 96 + 14;
+    return Math.max(8, Math.min(top, 108));
+  }
+
+  _formatForecastTime(datetime, mode) {
+    if (!datetime) return '--';
+    if (mode === 'daily') return this._getWeekday(datetime);
+    const parts = String(datetime).split(' ');
+    return parts[1] ? parts[1].slice(0, 5) : String(datetime).slice(11, 16);
+  }
+
+  _formatForecastDate(datetime, mode) {
+    if (!datetime) return '';
+    if (mode === 'daily') {
+      const date = new Date(String(datetime).replace(/-/g, '/'));
+      if (Number.isNaN(date.getTime())) return datetime;
+      return `${date.getMonth() + 1}月${date.getDate()}日`;
+    }
+    const datePart = String(datetime).split(' ')[0] || '';
+    const date = new Date(datePart.replace(/-/g, '/'));
+    if (Number.isNaN(date.getTime())) return datePart;
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }
+
+  _isToday(datetime) {
+    if (!datetime) return false;
+    const date = new Date(String(datetime).split(' ')[0].replace(/-/g, '/'));
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  }
+
+  _isCurrentForecastItem(datetime, mode = this.forecastMode) {
+    if (!datetime) return false;
+    const raw = String(datetime);
+    let date = new Date(raw);
+    if (Number.isNaN(date.getTime())) {
+      date = new Date(raw.replace(/-/g, '/').replace('T', ' '));
+    }
+    if (Number.isNaN(date.getTime())) return false;
+    const now = new Date();
+    if (mode === 'daily') {
+      return date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate();
+    }
+    if (mode === 'hourly') {
+      return date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate() &&
+        date.getHours() === now.getHours();
+    }
+    const itemStart = new Date(date);
+    itemStart.setSeconds(0, 0);
+    const itemEnd = new Date(itemStart.getTime() + 5 * 60 * 1000);
+    return now >= itemStart && now < itemEnd;
+  }
+
+  _getAqiColor(category) {
+    switch(category) {
+      case '优': return '#46c878';
+      case '良': return '#f3c74b';
+      case '轻度污染': return '#ff9b54';
+      case '中度污染': return '#ff6f4c';
+      case '重度污染': return '#ef4e5d';
+      case '严重污染': return '#9d62d9';
+      default: return '#8aa1b5';
+    }
+  }
+
+  _getAqiProgress(aqiValue) {
+    const numeric = parseFloat(aqiValue);
+    if (Number.isNaN(numeric) || numeric <= 0) return 0;
+    return Math.min(numeric, 150) / 150 * 360;
+  }
+
+  _getRainfallMax(mode = this.forecastMode) {
+    if (mode === 'daily') return 25;
+    if (mode === 'hourly') return 5;
+    return 1;
+  }
+
+  _getRainHeightPercent(rainfall, mode = this.forecastMode) {
+    const amount = parseFloat(rainfall) || 0;
+    if (amount <= 0) return 0;
+    const max = this._getRainfallMax(mode);
+    const percent = Math.min((amount / max) * 100, 100);
+    return Math.min(10 + percent, 100);
+  }
+
+  _openIndexDetail(index) {
+    this.selectedIndexDetail = index;
+  }
+
+  _openWarnings(warnings) {
+    if (!Array.isArray(warnings) || warnings.length === 0) return;
+    this.selectedWarningDetail = warnings;
+  }
+
+  _drawForecastCurves() {
+    const data = this._getForecast();
+    if (!this.shadowRoot || data.length < 2) return;
+    const canvas = this.shadowRoot.querySelector('.curve-canvas');
+    if (!canvas) return;
+    const cards = [...this.shadowRoot.querySelectorAll('.forecast-card')];
+    if (cards.length < 2) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const firstRect = cards[0].getBoundingClientRect();
+    const lastRect = cards[cards.length - 1].getBoundingClientRect();
+    const itemWidth = firstRect.width;
+    const totalWidth = Math.max(rect.width, lastRect.left - firstRect.left + itemWidth);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(totalWidth * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    canvas.style.width = `${totalWidth}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, totalWidth, rect.height);
+    const range = this._getTemperatureRange(data);
+    const makePoints = key => data.map((item, index) => ({
+      x: (cards[index].getBoundingClientRect().left - firstRect.left) + (cards[index].getBoundingClientRect().width / 2),
+      y: this._tempTop(item[key], range)
+    }));
+    const draw = (points, color) => {
+      if (points.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const current = points[i];
+        const next = points[i + 1];
+        const midX = (current.x + next.x) / 2;
+        ctx.bezierCurveTo(midX, current.y, midX, next.y, next.x, next.y);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 5;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
+    if (this.forecastMode === 'daily') {
+      draw(makePoints('native_temperature'), 'rgba(255, 155, 84, 0.86)');
+      draw(makePoints('native_temp_low'), 'rgba(74, 167, 255, 0.82)');
+    } else {
+      draw(makePoints('native_temperature'), this.forecastMode === 'minutely' ? 'rgba(70, 200, 120, 0.86)' : 'rgba(255, 155, 84, 0.86)');
+    }
+  }
+
+  render() {
+    if (!this.hass || !this.config) return html``;
+    this._updateActiveEntity();
+    if (!this.entity || this.entity.state === 'unavailable') {
+      return html`<div class="weather-shell"><div class="empty-state">暂无天气数据</div></div>`;
+    }
+
+    const attrs = this.entity.attributes || {};
+    const theme = this._evaluateTheme();
+    const dark = theme !== 'on';
+    const entities = this._getConfiguredEntities();
+    const configuredWidth = this.config?.width;
+    const condition = attrs.condition_cn || attrs.condition || this.entity.state || '未知';
+    const warning = Array.isArray(attrs.warning) ? attrs.warning : [];
+    const warningTheme = this._getWarningChipTheme(warning);
+    const aqi = attrs.aqi || {};
+    const aqiCategory = aqi.category || '未知';
+    const aqiValue = aqi.aqi || aqi.value || attrs.aqis || '--';
+    const sun = attrs.sun || {
+      sunrise: attrs.sunrise,
+      sunset: attrs.sunset
+    };
+
+    return html`
+      <div class="weather-shell ${dark ? 'dark' : ''}" style="${configuredWidth ? `--weather-card-width: min(${configuredWidth}px, calc(94vw - 6px));` : ''}">
+        <div class="weather-layout">
+          <main class="weather-main">
+            ${this._renderEntitySwitcher(entities)}
+            <div class="hero">
+              <div class="current">
+                <div class="current-icon">
+                  <img src="${this._getWeatherIcon(condition)}" alt="${condition}">
+                </div>
+                <div>
+                  <div class="temp-line">
+                    <div class="temperature">${this._formatTemp(attrs.temperature)}°</div>
+                    <div class="condition">${condition}</div>
+                  </div>
+                  <div class="city-line">
+                    <ha-icon icon="mdi:map-marker-outline"></ha-icon>
+                    <span>${attrs.city || attrs.friendly_name || this.entity.entity_id}</span>
+                  </div>
+                  <div class="meta-line">
+                    <ha-icon icon="mdi:clock-outline"></ha-icon>
+                    <span>${this._getRelativeTime(attrs.update_time || this.entity.last_updated)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="right-summary">
+                <div class="sun-chip glass">
+                  <div class="sun-slot">
+                    <ha-icon icon="mdi:weather-sunset-up"></ha-icon>
+                    <div class="sun-slot-copy">
+                      <div class="sun-slot-label">
+                        <span>日出</span>
+                      </div>
+                      <div class="sun-slot-time">${sun.sunrise || '--:--'}</div>
+                    </div>
+                  </div>
+                  <div class="sun-slot">
+                    <ha-icon icon="mdi:weather-sunset-down"></ha-icon>
+                    <div class="sun-slot-copy">
+                      <div class="sun-slot-label">
+                        <span>日落</span>
+                      </div>
+                      <div class="sun-slot-time">${sun.sunset || '--:--'}</div>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  class="warning-chip glass ${warning.length ? 'has-warning' : ''}"
+                  style="--warning-chip-bg:${warningTheme.bg}; --warning-chip-border:${warningTheme.border}; --warning-chip-fg:${warningTheme.fg}; --warning-chip-subtle:${warningTheme.subtle}; --warning-chip-count-bg:${warningTheme.countBg};"
+                  ?disabled=${!warning.length}
+                  @click=${() => this._openWarnings(warning)}>
+                  <div class="warning-chip-copy">
+                    <div class="warning-chip-meta">
+                      <ha-icon icon="${warning.length ? 'mdi:alert-circle-outline' : 'mdi:shield-check-outline'}"></ha-icon>
+                      <span>${warning.length ? '天气预警' : '预警状态'}</span>
+                    </div>
+                    <div class="warning-chip-title">${warning.length ? `${warning[0].title || warning[0].typeName || '预警生效中'}` : '暂无预警'}</div>
+                    <div class="warning-chip-subtitle">${warning.length ? '点击查看详细预警信息' : '当前天气状态稳定'}</div>
+                  </div>
+                  <div class="warning-chip-count">${warning.length ? warning.length : 0}</div>
+                </button>
+              </div>
+            </div>
+
+            ${this._renderMetrics(attrs)}
+
+            <div class="forecast-header">
+              <div class="segments glass">
+                <div class="segments-indicator"></div>
+                ${['daily', 'hourly', 'minutely'].map(mode => html`
+                  <button class="segment ${this.forecastMode === mode ? 'active' : ''}" @click=${() => this._setForecastMode(mode)}>
+                    ${mode === 'daily' ? '每日' : mode === 'hourly' ? '小时' : '分钟'}
+                  </button>
+                `)}
+              </div>
+              <div class="minutely-summary">${attrs.minutely_summary || '暂无分钟降水摘要'}</div>
+            </div>
+
+            ${this._renderForecast()}
+          </main>
+          ${this._renderInspector(attrs)}
+        </div>
+        ${this.selectedIndexDetail ? this._renderIndexDetailDialog(this.selectedIndexDetail) : ''}
+        ${this.selectedWarningDetail ? this._renderWarningDialog(this.selectedWarningDetail) : ''}
+      </div>
+    `;
+  }
+
+  _renderEntitySwitcher(entities) {
+    return html`
+      <div class="entity-switcher"
+        @pointerdown=${this._handleEntityPointerDown}
+        @pointerup=${this._handleEntityPointerUp}>
+        <div class="switcher-indicator"></div>
+        ${entities.map((entityId, index) => html`
+          <button class="entity-pill ${this.selectedEntityIndex === index ? 'active' : ''}" @click=${() => this._selectEntity(index)}>
+            ${this._getEntityName(entityId, index)}
+          </button>
+        `)}
+      </div>
+    `;
+  }
+
+  _renderMetrics(attrs) {
+    const metrics = [
+      ['湿度', this._formatValue(attrs.humidity, '%'), 'mdi:water-percent', '#4aa7ff'],
+      ['体感', this._formatValue(attrs.apparent_temperature, '°'), 'mdi:thermometer-lines', '#ff9b54'],
+      ['露点', this._formatValue(attrs.dew_point, '°'), 'mdi:water-thermometer', '#56d5e9'],
+      ['云量', this._formatValue(attrs.cloud_coverage, '%'), 'mdi:cloud-outline', '#a3b5c8'],
+      ['风速', `${attrs.winddir || this._getWindDirectionIcon(attrs.wind_bearing || 0)} ${this._formatValue(attrs.wind_speed, 'km/h')}`, 'mdi:weather-windy', '#8fd0ff'],
+      ['风级', this._formatValue(attrs.windscale, '级'), 'mdi:windsock', '#9ab7ff'],
+      ['气压', this._formatValue(attrs.pressure, 'hPa'), 'mdi:gauge', '#8ec5ff'],
+      ['能见度', this._formatValue(attrs.visibility, 'km'), 'mdi:eye-outline', '#68d3c4']
+    ];
+    return html`
+      <div class="metrics">
+        ${metrics.map(([label, value, icon, color]) => html`
+          <div class="metric glass" style="--metric-color: ${color};">
+            <div class="metric-icon"><ha-icon icon="${icon}"></ha-icon></div>
+            <div>
+              <div class="metric-label">${label}</div>
+              <div class="metric-value">${value}</div>
+            </div>
+          </div>
+        `)}
+      </div>
+    `;
+  }
+
+  _renderForecast() {
+    const data = this._getForecast();
+    if (data.length === 0) {
+      return html`<div class="empty-state glass">暂无${this.forecastMode === 'daily' ? '每日' : this.forecastMode === 'hourly' ? '小时' : '分钟'}预报数据</div>`;
+    }
+    const range = this._getTemperatureRange(data);
+    const mode = this.forecastMode;
+    const itemWidth = 112;
+    return html`
+      <div
+        class="forecast-scroll mode-${this._forecastTransitionDirection}"
+        @pointerdown=${this._handleForecastPointerDown}
+        @pointermove=${this._handleForecastPointerMove}
+        @pointerup=${this._handleForecastPointerEnd}
+        @pointercancel=${this._handleForecastPointerEnd}>
+        <div class="forecast-grid" style="grid-template-columns: repeat(${data.length}, ${itemWidth}px);">
+          <canvas class="curve-canvas" style="width: ${data.length * itemWidth}px;"></canvas>
+          ${data.map(item => this._renderForecastItem(item, range, mode))}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderForecastItem(item, range, mode) {
+    const high = item.native_temperature;
+    const low = mode === 'daily' ? item.native_temp_low : null;
+    const rain = parseFloat(item.native_precipitation) || 0;
+    const rainHeight = this._getRainHeightPercent(rain, mode);
+    const text = item.text || item.condition || '';
+    const windScale = item.windscaleday || item.windscale || '';
+    const wind = `${this._getWindDirectionIcon(item.wind_bearing || 0)}${windScale ? ` ${windScale}级` : ''}`;
+
+    return html`
+      <div class="forecast-card glass ${this._isCurrentForecastItem(item.datetime, mode) ? 'current-day' : ''}">
+        <div class="forecast-time">${this._formatForecastTime(item.datetime, mode)}</div>
+        <div class="forecast-date">${this._formatForecastDate(item.datetime, mode)}</div>
+        <div class="temp-zone">
+          ${rain > 0 ? html`<div class="rain-fill" style="height: ${rainHeight}%;"></div>` : ''}
+          <div class="temp-dot ${mode === 'minutely' ? 'minutely' : mode === 'daily' ? 'high' : 'hourly'}" style="top: ${this._tempTop(high, range)}px;">
+            <span class="temp-label ${mode === 'minutely' ? 'minutely' : mode === 'daily' ? 'high' : 'hourly'}">${this._formatTemp(high)}°</span>
+          </div>
+          ${mode === 'daily' ? html`
+            <div class="temp-dot low" style="top: ${this._tempTop(low, range)}px;">
+              <span class="temp-label low">${this._formatTemp(low)}°</span>
+            </div>
+          ` : ''}
+        </div>
+        <div class="rain-label">${rain > 0 ? `${rain}mm` : '无雨'}</div>
+        <div class="forecast-icon">
+          <img src="${this._getWeatherIcon(text)}" alt="${text}">
+        </div>
+        <div class="forecast-wind">${wind || text}</div>
+      </div>
+    `;
+  }
+
+  _renderInspector(attrs) {
+    return html`
+      <aside class="inspector glass">
+        <div class="inspector-content">
+          ${this._renderAqiPanel(attrs.aqi || {}, attrs.aqis)}
+          <div class="inspector-section-title">
+            <span>生活指数</span>
+            <span>点击查看详情</span>
+          </div>
+          ${this._renderIndicesPanel(attrs.air_indices || [])}
+        </div>
+      </aside>
+    `;
+  }
+
+  _renderAqiPanel(aqi, fallbackAqi) {
+    const category = aqi.category || '未知';
+    const aqiValue = aqi.aqi || aqi.value || fallbackAqi || '--';
+    const color = this._getAqiColor(category);
+    const progress = this._getAqiProgress(aqiValue);
+    const pollutants = [
+      ['PM2.5', aqi.pm2p5, 'μg/m³'],
+      ['PM10', aqi.pm10, 'μg/m³'],
+      ['SO₂', aqi.so2, 'μg/m³'],
+      ['NO₂', aqi.no2, 'μg/m³'],
+      ['CO', aqi.co, 'mg/m³'],
+      ['O₃', aqi.o3, 'μg/m³']
+    ];
+    return html`
+      <div class="aqi-hero" style="--aqi-color: ${color}; --aqi-progress: ${progress}deg;">
+        <ha-icon class="aqi-leaf" icon="mdi:leaf"></ha-icon>
+        <div class="aqi-gauge">
+          <div class="aqi-ring">
+            <div class="aqi-value-big">${aqiValue}</div>
+            <div class="aqi-unit">AQI</div>
+          </div>
+        </div>
+        <div>
+          <div class="aqi-title" style="color: ${color};">空气质量${category}</div>
+          <div class="aqi-subtitle">
+            <strong>空气清新，放心呼吸</strong>
+            <span>等级 ${aqi.level || '--'} · 首要污染物 ${aqi.primary || 'NA'}</span>
+          </div>
+        </div>
+      </div>
+      <div class="pollutants">
+        ${pollutants.map(([name, value, unit]) => html`
+          <div class="pollutant">
+            <div class="pollutant-name">${name}</div>
+            <div class="pollutant-value">
+              <span>${this._formatValue(value, '')}</span>
+              <span class="pollutant-unit">${unit === 'mg/m³' ? 'mg/m³' : this._getPollutantLevelText(name, value, category)}</span>
+            </div>
+          </div>
+        `)}
+      </div>
+      <div class="aqi-source">
+        <span>数据来源：和风天气</span>
+        <span>${aqi.pubTime ? this._formatForecastTime(aqi.pubTime.replace('T', ' '), 'hourly') : '实时'} 更新</span>
+      </div>
+    `;
+  }
+
+  _getPollutantLevelText(name, value, category) {
+    if (value === undefined || value === null || value === '') return '--';
+    if (name === 'CO') return 'mg/m³';
+    return category === '优' || category === '良' ? category : 'μg/m³';
+  }
+
+  _renderIndicesPanel(indices) {
+    if (!Array.isArray(indices) || indices.length === 0) {
+      return html`<div class="empty-state">暂无生活指数数据</div>`;
+    }
+    return html`
+      <div class="index-list">
+        ${indices.map(index => html`
+          <button class="index-row" style="--index-color: ${this._getIndexColor(index)};" @click=${() => this._openIndexDetail(index)}>
+            <div class="index-row-top">
+              <span class="index-icon"><ha-icon icon="${this._getIndexIcon(index)}"></ha-icon></span>
+              <span class="index-name">${this._getCompactIndexName(index)}</span>
+              <span class="index-category">${index.category || '--'}</span>
+            </div>
+            <div class="index-preview">${index.text || '暂无说明'}</div>
+          </button>
+        `)}
+      </div>
+    `;
+  }
+
+  _getIndexIcon(index) {
+    const name = index?.name || '';
+    if (name.includes('运动')) return 'mdi:run';
+    if (name.includes('洗车')) return 'mdi:car-wash';
+    if (name.includes('穿衣')) return 'mdi:tshirt-crew';
+    if (name.includes('钓鱼')) return 'mdi:fish';
+    if (name.includes('紫外') || name.includes('防晒')) return 'mdi:white-balance-sunny';
+    if (name.includes('旅游')) return 'mdi:bag-suitcase';
+    if (name.includes('过敏')) return 'mdi:leaf';
+    if (name.includes('舒适')) return 'mdi:emoticon-happy';
+    if (name.includes('感冒')) return 'mdi:pill';
+    if (name.includes('污染') || name.includes('扩散')) return 'mdi:weather-windy';
+    if (name.includes('空调')) return 'mdi:air-conditioner';
+    if (name.includes('太阳镜')) return 'mdi:sunglasses';
+    if (name.includes('化妆')) return 'mdi:bottle-tonic-plus';
+    if (name.includes('晾晒')) return 'mdi:hanger';
+    if (name.includes('交通')) return 'mdi:car';
+    return 'mdi:circle-small';
+  }
+
+  _getCompactIndexName(index) {
+    const name = index?.name || '指数';
+    if (name.includes('空气污染扩散条件')) return '污染扩散';
+    return name.replace(/指数$/u, '');
+  }
+
+  _getIndexColor(index) {
+    const name = index?.name || '';
+    if (name.includes('运动') || name.includes('过敏') || name.includes('舒适')) return '#55d66f';
+    if (name.includes('洗车') || name.includes('交通')) return '#43b7ff';
+    if (name.includes('穿衣') || name.includes('化妆')) return '#ffd35a';
+    if (name.includes('钓鱼')) return '#65d5df';
+    if (name.includes('紫外') || name.includes('防晒') || name.includes('太阳镜')) return '#ffca42';
+    if (name.includes('旅游')) return '#a976ff';
+    if (name.includes('感冒')) return '#78a9ff';
+    if (name.includes('污染') || name.includes('空调')) return '#9bd4ff';
+    if (name.includes('晾晒')) return '#b9b7ff';
+    return '#56d5e9';
+  }
+
+  _renderIndexDetailDialog(index) {
+    return html`
+      <div class="detail-overlay" @click=${() => this.selectedIndexDetail = null}>
+        <div class="detail-dialog glass" @click=${e => e.stopPropagation()}>
+          <div class="detail-head">
+            <div>
+              <div class="detail-title">${index.name || '生活指数'}</div>
+              <div class="detail-meta">
+                <span class="detail-chip glass">${index.date || '今日'}</span>
+                <span class="detail-chip glass">等级 ${index.level || '--'}</span>
+                <span class="detail-chip glass">${index.category || '--'}</span>
+              </div>
+            </div>
+            <button class="icon-button" title="关闭" @click=${() => this.selectedIndexDetail = null}>
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>
+          <div class="detail-text">${index.text || '暂无详细说明。'}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderWarningDialog(warnings) {
+    return html`
+      <div class="detail-overlay" @click=${() => this.selectedWarningDetail = null}>
+        <div class="detail-dialog warning-dialog glass" @click=${e => e.stopPropagation()}>
+          <div class="detail-head">
+            <div>
+              <div class="detail-title">天气预警</div>
+              <div class="detail-meta">
+                <span class="detail-chip glass">${warnings.length} 条预警</span>
+              </div>
+            </div>
+            <button class="icon-button" title="关闭" @click=${() => this.selectedWarningDetail = null}>
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>
+          <div class="warning-list">
+            ${warnings.map(item => {
+              const level = item.level || '预警';
+              const typeName = item.typeName || item.type || '天气';
+              const sender = item.sender || item.title || '气象台';
+              const startTime = this._formatToShanghaiTime(item.startTime || item.pubTime || item.date || '--');
+              const text = item.text || item.description || '暂无详细说明';
+              const color = this._getWarningColor([item]) || '#ff8a54';
+              return html`
+                <div class="warning-item-v2" style="--warning-color: ${color};">
+                  <div class="warning-item-head">
+                    <div class="warning-item-title">${sender} ${typeName}${level}</div>
+                    <div class="warning-item-time">${startTime}</div>
+                  </div>
+                  <div class="warning-item-text">${text}</div>
+                </div>
+              `;
+            })}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  setConfig(config) {
+    const entities = Array.isArray(config.entities) ? config.entities : [];
+    if (!config.entity && entities.length === 0) {
+      throw new Error('需要指定天气实体');
+    }
+    this.config = config;
+    this._defaultIndexApplied = false;
+  }
+}
+customElements.define('xiaoshi-weather-pad-card', XiaoshiWeatherPadCardV2);
 
 class XiaoshiHourlyWeatherCard extends LitElement {
   static get properties() {
@@ -5752,6 +7400,7 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     const secondaryColor = 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
+    // 构造分钟曲线点：与温度点同一坐标系，确保曲线穿过每个点中心
     const { BUTTON_HEIGHT_PX, CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
     const actualMinutes = minutelyForecast.length || 1;
     const positions = (() => {
@@ -5767,8 +7416,14 @@ class XiaoshiHourlyWeatherCard extends LitElement {
         return (maxTemp - tempVal) * unitPosition;
       });
     })();
+    
+    // 根据用户要求：dot模式下调2.5px，button模式上调3px
+    // 基础偏移：dot模式为2.5 (半径)，button模式为 BUTTON_HEIGHT_PX / 1.7 (约10px)
+    // 叠加修正：dot + 2.5, button - 3
     const isDotMode = this.config?.visual_style === 'dot';
-    const centerOffset = isDotMode ? (2.5 + 2.5) : ((BUTTON_HEIGHT_PX / 1.7) - 3);
+    const centerOffset = isDotMode 
+      ? (2.5 + 2.5)
+      : ((BUTTON_HEIGHT_PX / 1.7) - 3);
     const DOT_SHIFT_PX = 5;
     const points = minutelyForecast.map((_, index) => {
       const x = (index * 100) / actualMinutes + (100 / actualMinutes) / 2;
@@ -5776,32 +7431,41 @@ class XiaoshiHourlyWeatherCard extends LitElement {
       const y = Math.max(0, Math.min(positions[index] + centerOffset + extraShift, CONTAINER_HEIGHT_PX));
       return { x, y };
     });
+    
     const instanceId = this._getInstanceId();
     const canvasId = `minutely-temp-canvas-${instanceId}`;
+    
     this.updateComplete.then(() => {
       setTimeout(() => {
         this._drawTemperatureCurve(canvasId, points, 'rgba(76, 175, 80)');
       }, 50);
     });
+    
     return html`
       <div class="forecast-container-wrapper" style="position: relative; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x;">
         <div class="forecast-container" 
              style="display: grid; grid-template-columns: repeat(${minutelyForecast.length}, minmax(50px, 1fr)); gap: 2px; width: ${minutelyForecast.length * 50+(minutelyForecast.length-1)*2 }px;">
           <canvas class="temp-line-canvas temp-line-canvas-high temp-line-canvas-minutely" 
                   id="minutely-temp-canvas-${this._getInstanceId()}"></canvas>
+        
         ${minutelyForecast.map((minute, index) => {
           const timeStr = this._formatMinutelyTime(minute.datetime);
           const dateStr = this._formatMinutelyDate(minute.datetime);
           const temp = this._formatTemperature(minute.native_temperature);
+          
           const rainfall = parseFloat(minute.native_precipitation) || 0;
+          
           const pointY = points[index]?.y ?? (CONTAINER_HEIGHT_PX / 2 + centerOffset + (isDotMode ? DOT_SHIFT_PX : 0));
-          const RAINFALL_MAX = 1; 
+          
+          const RAINFALL_MAX = 1; // 最大雨量1mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
           const topForDot = pointY - centerOffset;
+
           return html`
             <div class="forecast-day" style="background: ${backgroundColor};">
               <div class="forecast-weekday">${timeStr}</div>
               <div class="forecast-date" style="color: ${secondaryColor};">${dateStr}</div>
+              
               <div class="forecast-temp-container">
                 ${this.config.visual_style === 'dot' ? html`
                   <div class="temp-curve-minutely" style="top: ${topForDot}px">
@@ -5812,14 +7476,17 @@ class XiaoshiHourlyWeatherCard extends LitElement {
                     ${temp}°
                   </div>
                 `}
+                
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight + 10}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
             </div>
           `;
         })}
+        
+        <!-- 雨量标签行 -->
         ${minutelyForecast.map(minute => {
           const rainfall = parseFloat(minute.native_precipitation) || 0;
           return html`
@@ -5832,7 +7499,11 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
+        
+        <!-- 天气图标行 -->
         ${this._renderHourlyWeatherIcons(minutelyForecast)}
+        
+        <!-- 风向风级行 -->
         ${this._renderHourlyWindInfo(minutelyForecast)}
         </div>
       </div>
@@ -6013,138 +7684,6 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     }
   }
 
-  _getWarningColor(warning) {
-    if (!warning || warning.length === 0) return "#FFA726"; // 默认颜色
-    
-    let level = "";
-    const priority = ["红色", "橙色", "黄色", "蓝色"];
-    
-    for (let i = 0; i < warning.length; i++) {
-      const currentLevel = warning[i].level;
-      if (priority.indexOf(currentLevel) < priority.indexOf(level) || level == "") {
-        level = currentLevel;
-      }
-    }
-    
-    return this._getWarningColorForLevel(level);
-  }
-
-  _getWarningColorForLevel(level) {
-    if (level == "红色") return "rgb(255,50,50)";
-    if (level == "橙色") return "rgb(255,100,0)";
-    if (level == "黄色") return "rgb(255,200,0)";
-    if (level == "蓝色") return "rgb(50,150,200)";
-    
-    return "#FFA726"; // 默认颜色
-  }
-
-  _toggleWarningModal() {
-    if (this.entity?.attributes?.warning && window.browser_mod) {
-       window.browser_mod.service('popup', {
-        title: '预警信息',
-        content: {
-          type: 'markdown',
-          content: this.entity.attributes.warning.map(w => `### ${w.title}\n${w.text}`).join('\n\n---\n\n')
-        }
-      });
-    }
-  }
-
-  _getAqiCategoryHtml() {
-    const category = this.entity.attributes?.aqi?.category;
-    if (!category) return '';
-    
-    let color = '';
-    switch(category) {
-      case '优':
-        color = '#4CAF50'; // 绿色
-        break;
-      case '良':
-        color = '#FFC107'; // 黄色
-        break;
-      case '轻度污染':
-        color = '#FF9800'; // 橙色
-        break;
-      case '中度污染':
-      case '重度污染':
-      case '严重污染':
-        color = '#F44336'; // 红色
-        break;
-      default:
-        color = '#9E9E9E'; // 灰色（其他未知类别）
-    }
-    
-    return html`
-            <button class="toggle-btn-aqi" style="color: ${color};" @click="${() => this._toggleApiInfo()}">
-              ${category}
-            </button>
-            ` 
-  }
-
-  _toggleApiInfo() {
-    if (window.browser_mod && this.config) {
-       window.browser_mod.service('popup', {
-         title: '空气质量',
-         card: {
-           type: 'custom:xiaoshi-aqi-weather-card',
-           entity: this.config.entity,
-           theme: this.config.theme
-         }
-       });
-    }
-  }
-
-  _renderDetailedInfo() {
-    const theme = this._evaluateTheme();
-    const secondaryColor = 'rgb(110, 190, 240)';
-    const temperature = this._formatTemperature(this.entity.attributes?.temperature);
-    const humidity = this._formatTemperature(this.entity.attributes?.humidity);
-    const condition = this.entity.attributes?.condition_cn || '未知';
-    const windSpeed = this.entity.attributes?.wind_speed || 0;
-    const pressure = this.entity.attributes?.pressure || 0;
-    const visibility = this.entity.attributes?.visibility || 0;
-    const warning = this.entity.attributes?.warning || [];
-    const warningColor = this._getWarningColor(warning);
-    const hasWarning = warning && Array.isArray(warning) && warning.length > 0;
-    const feelsLike = this.entity.attributes?.apparent_temperature !== undefined ? this.entity.attributes?.apparent_temperature : 0;
-    const cloud = this.entity.attributes?.cloud_coverage !== undefined ? this.entity.attributes?.cloud_coverage : 0;
-    const windScale = this.entity.attributes?.windscale !== undefined ? this.entity.attributes?.windscale : '';
-    const windDir = this.entity.attributes?.winddir || '';
-    let uv = 0;
-    if (this.entity.attributes?.air_indices) {
-      const uvIndex = this.entity.attributes.air_indices.find(i => i.name && (i.name.includes('紫外线') || i.name.includes('UV')));
-      if (uvIndex) {
-        uv = uvIndex.level || uvIndex.category || 0;
-      }
-    }
-    let aqiCategory = '未知';
-    if (this.entity.attributes?.aqi) {
-      aqiCategory = this.entity.attributes.aqi.category || this.entity.attributes.aqi.quality || '未知';
-    }
-
-    return html`
-        <div style="padding: 0 10px; text-align: left;">
-          <div class="weather-temperature" style="height: auto; font-size: 15px; margin-bottom: 6px;">
-            ${temperature}<span> ℃（天气温度）&ensp;</span>
-            ${feelsLike}<span> ℃（体感温度）&ensp;</span>
-            ${humidity}<span> %（天气湿度）</span>
-            ${hasWarning ? html`<span class="warning-icon-text" style="color: ${warningColor}; cursor: pointer; user-select: none;" @click="${() => this._toggleWarningModal()}">⚠ ${warning.length}</span>` : ''}
-          </div>
-          <div class="weather-info" style="height: auto; font-size: 15px; margin-top: 0; white-space: normal;">
-            <span style="color: ${secondaryColor};">
-              ${condition}&ensp;
-              气压:${pressure}hPa&ensp;
-              云量:${cloud}%&ensp;
-              风速:${windSpeed}km/h (${windScale}级 ${windDir})&ensp;<br>
-              能见度:${visibility}km&ensp;
-              紫外线:${uv}级&ensp;
-              空气质量: ${aqiCategory}
-            </span>
-          </div>
-        </div>
-    `;
-  }
-
   render() {
     const forecastData = this.forecastMode === 'minutely' ? this._getMinutelyForecast() : this._getHourlyForecast();
     
@@ -6197,8 +7736,23 @@ class XiaoshiHourlyWeatherCard extends LitElement {
               <div class="weather-icon">
                 <img src="${this._getWeatherIcon(condition)}" alt="${condition}">
               </div>
-              <div class="weather-details" style="flex: 1;">
-                ${this._renderDetailedInfo()}
+              <div class="weather-details">
+                <div class="weather-temperature">
+                  ${temperature}<font size="1px"><b> ℃&ensp;</b></font>
+                  ${humidity}<font size="1px"><b> % </b></font>
+                </div>
+                <div class="weather-info">
+                  <span style="color: ${secondaryColor};">${condition}   
+                    ${windSpeed}<span style="font-size: 0.6em;">km/h </span>
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="weather-right-align" style="flex-shrink: 0;">
+              <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px">
+                <!-- 指数 -->
+                ${this._getAqiCategoryHtml()}
               </div>
             </div>
           </div>
@@ -6217,61 +7771,91 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     const secondaryColor = 'rgb(110, 190, 240)';
     const backgroundColor = theme === 'on' ? 'rgba(120, 120, 120, 0.1)' : 'rgba(255, 255, 255, 0.1)';
     
+    // 生成温度曲线坐标（小时天气只有一个温度）
     const tempData = this._generateHourlyTemperatureLine(hourlyForecast, extremes, true);
+    
+    // 使用组件实例ID + Canvas ID，避免多实例冲突
     const instanceId = this._getInstanceId();
     const canvasId = `hourly-temp-canvas-${instanceId}`;
+    
+    // 在DOM更新完成后绘制曲线
     this.updateComplete.then(() => {
       setTimeout(() => {
         this._drawTemperatureCurve(canvasId, tempData.points, 'rgba(156, 39, 176)');
       }, 50);
     });
+    
     return html`
       <div class="forecast-container-wrapper" style="position: relative; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; touch-action: pan-x;">
         <div class="forecast-container" 
              style="display: grid; grid-template-columns: repeat(${hourlyForecast.length}, minmax(50px, 1fr)); gap: 2px; width: ${hourlyForecast.length * 50+(hourlyForecast.length-1)*2 }px;">
+          <!-- 小时温度连接线 Canvas - 绝对定位覆盖整个可滚动区域 -->
           <canvas class="temp-line-canvas temp-line-canvas-high temp-line-canvas-hourly" 
                   id="hourly-temp-canvas-${this._getInstanceId()}"></canvas>
+        
         ${hourlyForecast.map((hour, index) => {
           const timeStr = this._formatHourlyTime(hour.datetime);
           const dateStr = this._formatHourlyDate(hour.datetime);
           const temp = this._formatTemperature(hour.native_temperature);
+          
+          // 获取雨量信息
           const rainfall = parseFloat(hour.native_precipitation) || 0;
+          
+          // 计算温度位置（简化版）
           const { minTemp, maxTemp, range, allEqual } = extremes;
           const { BUTTON_HEIGHT_PX, CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
+          // 使用实际可用高度：容器高度减去按钮高度
           const availableHeight = CONTAINER_HEIGHT_PX - BUTTON_HEIGHT_PX;
+          
           let finalTopPosition;
           if (allEqual) {
+            // 如果所有温度相等，将位置设置在中间
             finalTopPosition = availableHeight / 2;
           } else {
             const unitPosition = range === 0 ? 0 : availableHeight / range;
             const tempValue = parseFloat(hour.native_temperature) || 0;
             const topPosition = (maxTemp - tempValue) * unitPosition;
+            // 最高温度应该显示在顶部(position: 0)，最低温度在底部(position: availableHeight)
             finalTopPosition = Math.max(0, Math.min(topPosition, availableHeight));
           }
-          const RAINFALL_MAX = 16;
+          
+          // 计算雨量矩形高度和位置
+          const RAINFALL_MAX = 5; // 最大雨量5mm
           const rainfallHeight = Math.min((rainfall / RAINFALL_MAX) * 125, 125);
+
           return html`
             <div class="forecast-day" style="background: ${backgroundColor};">
+              <!-- 时间（hh:mm） -->
               <div class="forecast-weekday">${timeStr}</div>
+              
+              <!-- 日期（mm月dd日） -->
               <div class="forecast-date" style="color: ${secondaryColor};">${dateStr}</div>
+              
+              <!-- 温度（紫色） -->
               <div class="forecast-temp-container">
                 ${this.config.visual_style === 'dot' ? html`
+                  <!-- 圆点模式 -->
                   <div class="temp-curve-hourly" style="top: ${finalTopPosition}px">
                     <div class="temp-text">${temp}°</div>
                   </div>
                 ` : html`
+                  <!-- 按钮模式 -->
                   <div class="temp-curve-hourly" style="top: ${finalTopPosition}px">
                     ${temp}°
                   </div>
                 `}
+                
+                <!-- 雨量填充矩形 -->
                 ${rainfall > 0 ? html`
-                  <div class="rainfall-fill" style="height: ${rainfallHeight}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
+                  <div class="rainfall-fill" style="height: ${rainfallHeight + 10}px; opacity: ${0.3+rainfall / RAINFALL_MAX}"></div>
                 ` : ''}
               </div>
               <div class="forecast-temp-null"></div>
             </div>
           `;
         })}
+        
+        <!-- 雨量标签行 - 10列网格 -->
         ${hourlyForecast.map(hour => {
           const rainfall = parseFloat(hour.native_precipitation) || 0;
           return html`
@@ -6284,13 +7868,17 @@ class XiaoshiHourlyWeatherCard extends LitElement {
             </div>
           `;
         })}
+        
+        <!-- 天气图标行 -->
         ${this._renderHourlyWeatherIcons(hourlyForecast)}
+        
+        <!-- 风向风级行 -->
         ${this._renderHourlyWindInfo(hourlyForecast)}
       </div>
     `;
   }
 
-  _drawTemperatureCurve(canvasId, points, color, dashedSegmentInfo) {
+  _drawTemperatureCurve(canvasId, points, color) {
     
     requestAnimationFrame(() => {
       // 先在shadow DOM中查找，再在document中查找
@@ -6335,8 +7923,13 @@ class XiaoshiHourlyWeatherCard extends LitElement {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
+      // 开始绘制路径
+      ctx.beginPath();
+      
       const { CONTAINER_HEIGHT_PX } = XiaoshiWeatherPadCard.TEMPERATURE_CONSTANTS;
-      const canvasPoints = points.map((point) => {
+      
+      // 转换所有点为Canvas坐标
+      const canvasPoints = points.map((point, index) => {
         const x = (point.x / 100) * canvas.width;
         const y = (point.y / CONTAINER_HEIGHT_PX) * canvas.height;
         return { x, y };
@@ -6353,50 +7946,45 @@ class XiaoshiHourlyWeatherCard extends LitElement {
         return;
       }
       
-      const tension = 0.2;
-      const drawSegment = (startIndex, endIndexInclusive, dashed) => {
-        ctx.beginPath();
-        if (dashed) {
-          ctx.setLineDash([6, 12]);
-          ctx.globalAlpha = 0.6;
+      // 开始绘制平滑曲线，确保通过所有原始点
+      ctx.beginPath();
+      ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
+      
+      // 使用更保守的样条算法，减少曲线过度弯曲
+      const tension = 0.2; // 减小张力系数，避免过度弯曲
+      
+      for (let i = 0; i < canvasPoints.length - 1; i++) {
+        const p0 = canvasPoints[Math.max(0, i - 1)];
+        const p1 = canvasPoints[i];
+        const p2 = canvasPoints[i + 1];
+        const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
+        
+        // 计算控制点，限制控制点距离，避免过度弯曲
+        const dx1 = (p2.x - p0.x) * tension;
+        const dy1 = (p2.y - p0.y) * tension;
+        const dx2 = (p3.x - p1.x) * tension;
+        const dy2 = (p3.y - p1.y) * tension;
+        
+        // 限制控制点的垂直距离，防止曲线超出边界
+        const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
+        const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
+        const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
+        
+        const cp1x = p1.x + dx1;
+        const cp1y = p1.y + limitedDy1;
+        const cp2x = p2.x - dx2;
+        const cp2y = p2.y - limitedDy2;
+        
+        // 如果是第一段，使用二次贝塞尔
+        if (i === 0) {
+          ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
         } else {
-          ctx.setLineDash([]);
-          ctx.globalAlpha = 1;
+          // 使用三次贝塞尔曲线，确保通过原始点
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
         }
-        ctx.moveTo(canvasPoints[startIndex].x, canvasPoints[startIndex].y);
-        for (let i = startIndex; i < endIndexInclusive; i++) {
-          const p0 = canvasPoints[Math.max(0, i - 1)];
-          const p1 = canvasPoints[i];
-          const p2 = canvasPoints[Math.min(canvasPoints.length - 1, i + 1)];
-          const p3 = canvasPoints[Math.min(canvasPoints.length - 1, i + 2)];
-          const dx1 = (p2.x - p0.x) * tension;
-          const dy1 = (p2.y - p0.y) * tension;
-          const dx2 = (p3.x - p1.x) * tension;
-          const dy2 = (p3.y - p1.y) * tension;
-          const maxControlDistance = Math.abs(p2.x - p1.x) * 0.3;
-          const limitedDy1 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy1));
-          const limitedDy2 = Math.max(-maxControlDistance, Math.min(maxControlDistance, dy2));
-          const cp1x = p1.x + dx1;
-          const cp1y = p1.y + limitedDy1;
-          const cp2x = p2.x - dx2;
-          const cp2y = p2.y - limitedDy2;
-          if (i === startIndex) {
-            ctx.quadraticCurveTo(cp1x, cp1y, p2.x, p2.y);
-          } else {
-            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-          }
-        }
-        ctx.stroke();
-      };
-      if (dashedSegmentInfo && typeof dashedSegmentInfo.endIndex === 'number') {
-        const endIdx = Math.max(1, Math.min(canvasPoints.length - 1, dashedSegmentInfo.endIndex));
-        drawSegment(0, endIdx, true);
-        if (endIdx < canvasPoints.length - 1) {
-          drawSegment(endIdx, canvasPoints.length - 1, false);
-        }
-      } else {
-        drawSegment(0, canvasPoints.length - 1, false);
       }
+      
+      ctx.stroke();
     });
   }
 
@@ -7496,6 +9084,15 @@ class XiaoshiIndicesWeatherCard extends LitElement {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 8px;
+        max-height: 300px;
+        overflow-y: auto;
+        /* 隐藏滚动条但保留功能 */
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none;  /* IE and Edge */
+      }
+
+      .indices-grid::-webkit-scrollbar {
+        display: none; /* Chrome, Safari, Opera */
       }
 
       .index-item {
@@ -7681,3 +9278,4 @@ window.customCards.push(
     preview: true
   }
 );
+
