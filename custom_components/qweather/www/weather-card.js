@@ -5369,7 +5369,8 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
       }
 
       .temp-label.low {
-        color: var(--weather-blue);
+        color: rgba(223, 245, 255, 0.72);
+        text-shadow: 0 1px 2px rgba(8, 42, 58, 0.32);
         top: 8px;
       }
 
