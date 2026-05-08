@@ -9,6 +9,10 @@
 
 这次更新主要聚焦天气卡片重构，集成本身保持原样。
 
+## 效果预览
+
+![xiaoshi-weather-pad-card 效果图](docs/images/xiaoshi-weather-pad-card-preview.png)
+
 ## 项目说明
 
 - 数据来源：和风天气官方 API
