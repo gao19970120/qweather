@@ -9,7 +9,7 @@ import json
 import sys
 import time
 import homeassistant.helpers.config_validation as cv
-from homeassistant.const import CONF_HOST, CONF_API_KEY, CONF_NAME, ATTR_ENTITY_ID
+from homeassistant.const import CONF_HOST, CONF_API_KEY, CONF_NAME, ATTR_ENTITY_ID, CONF_LATITUDE, CONF_LONGITUDE
 from collections import OrderedDict
 from homeassistant import config_entries
 from homeassistant.core import callback
@@ -18,6 +18,7 @@ from .const import (
     CONF_ZONE_OR_DEVICE,
     CONF_STARTTIME,
     CONF_UPDATE_INTERVAL,
+    CONF_MINUTELY_UPDATE_INTERVAL,
     CONF_NO_UPDATE_AT_NIGHT,
     CONF_ENABLE_HOURLY,
     CONF_ENABLE_WARNING,
@@ -29,6 +30,17 @@ from .const import (
 import voluptuous as vol
 
 _LOGGER = logging.getLogger(__name__)
+
+UPDATE_INTERVAL_OPTIONS = {10: "10分钟", 20: "20分钟", 30: "30分钟", 60: "60分钟"}
+MINUTELY_UPDATE_INTERVAL_OPTIONS = {
+    5: "5分钟",
+    10: "10分钟",
+    15: "15分钟",
+    20: "20分钟",
+    30: "30分钟",
+    45: "45分钟",
+    60: "1小时",
+}
 
 @config_entries.HANDLERS.register(DOMAIN)
 
@@ -100,20 +112,14 @@ class QWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._errors = {}
         
         if user_input is not None:
-            # 检查城市搜索模式是否已存在
-            if user_input["location_mode"] == "城市搜索":
-                # 检查是否已经存在使用城市搜索模式的集成
-                for entry in self.hass.config_entries.async_entries(DOMAIN):
-                    if entry.data.get("location_mode") == "城市搜索":
-                        self._errors["base"] = "城市搜索模式只能添加1次集成"
-                        return await self._show_mode_form(user_input)
-            
             # 保存模式选择
             self.user_input.update(user_input)
             
             # 根据选择的模式进入不同的步骤
             if user_input["location_mode"] == "选择设备":
                 return await self.async_step_device()
+            if user_input["location_mode"] == "经纬度":
+                return await self.async_step_location()
             else:
                 return await self.async_step_city()
         
@@ -124,22 +130,9 @@ class QWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None:
             user_input = {}
         
-        # 检查是否已存在城市搜索模式的集成
-        city_search_exists = False
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.data.get("location_mode") == "城市搜索":
-                city_search_exists = True
-                break
-        
-        # 如果已存在城市搜索模式，则只提供选择设备选项
-        if city_search_exists:
-            data_schema = vol.Schema({
-                vol.Required("location_mode", default="选择设备"): vol.In(["选择设备"]),
-            })
-        else:
-            data_schema = vol.Schema({
-                vol.Required("location_mode", default="选择设备"): vol.In(["选择设备", "城市搜索"]),
-            })
+        data_schema = vol.Schema({
+            vol.Required("location_mode", default="选择设备"): vol.In(["选择设备", "城市搜索", "经纬度"]),
+        })
         
         return self.async_show_form(
             step_id="mode",
@@ -228,6 +221,44 @@ class QWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=data_schema,
             errors=self._errors,
         )
+
+    async def async_step_location(self, user_input=None):
+        """第3步C：输入经纬度"""
+        self._errors = {}
+
+        if user_input is not None:
+            longitude = str(user_input.get(CONF_LONGITUDE, "")).strip()
+            latitude = str(user_input.get(CONF_LATITUDE, "")).strip()
+            try:
+                lon = float(longitude)
+                lat = float(latitude)
+                if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+                    raise ValueError
+            except ValueError:
+                self._errors["base"] = "经纬度格式错误"
+                return await self._show_location_form(user_input)
+
+            self.user_input["location"] = f"{lon},{lat}"
+            self.user_input["location_mode"] = "经纬度"
+            return await self.async_step_update_interval()
+
+        return await self._show_location_form(user_input)
+
+    async def _show_location_form(self, user_input=None):
+        """显示第3步C表单：输入经纬度"""
+        if user_input is None:
+            user_input = {}
+
+        data_schema = vol.Schema({
+            vol.Required(CONF_LONGITUDE, default=user_input.get(CONF_LONGITUDE, "")): str,
+            vol.Required(CONF_LATITUDE, default=user_input.get(CONF_LATITUDE, "")): str,
+        })
+
+        return self.async_show_form(
+            step_id="location",
+            data_schema=data_schema,
+            errors=self._errors,
+        )
     
     async def async_step_update_interval(self, user_input=None):
         """第4步：设置更新周期"""
@@ -271,7 +302,8 @@ class QWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input = {}
 
         data_schema = vol.Schema({
-            vol.Required(CONF_UPDATE_INTERVAL, default=user_input.get(CONF_UPDATE_INTERVAL, 60)): vol.In({10: "10分钟", 20: "20分钟", 30: "30分钟", 60: "60分钟"}),
+            vol.Required(CONF_UPDATE_INTERVAL, default=user_input.get(CONF_UPDATE_INTERVAL, 60)): vol.In(UPDATE_INTERVAL_OPTIONS),
+            vol.Required(CONF_MINUTELY_UPDATE_INTERVAL, default=user_input.get(CONF_MINUTELY_UPDATE_INTERVAL, 5)): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
             vol.Required(CONF_NO_UPDATE_AT_NIGHT, default=user_input.get(CONF_NO_UPDATE_AT_NIGHT, False)): bool
         })
 
@@ -302,13 +334,7 @@ class QWeatherConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_import(self, user_input):
-        # 如果是城市搜索模式，检查是否已存在
-        if user_input.get("location_mode") == "城市搜索":
-            for entry in self._async_current_entries():
-                if entry.data.get("location_mode") == "城市搜索":
-                    return self.async_abort(reason="city_search_already_exists")
-        
-        # 对于其他模式，允许多次添加
+        # 各种模式都允许多次添加
         return self.async_create_entry(title="configuration.yaml", data=user_input)
     
     async def _check_existing(self, host):
@@ -359,7 +385,8 @@ class QweatherOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_ZONE_OR_DEVICE, default=user_input.get(CONF_ZONE_OR_DEVICE, "")): vol.In(entity_list),
             vol.Optional("城市搜索", default=user_input.get("城市搜索", "")): str,
         }).extend({
-            vol.Optional(CONF_UPDATE_INTERVAL, default=user_input.get(CONF_UPDATE_INTERVAL, 60)): vol.In({10: "10分钟", 20: "20分钟", 30: "30分钟", 60: "60分钟"}),
+            vol.Optional(CONF_UPDATE_INTERVAL, default=user_input.get(CONF_UPDATE_INTERVAL, 60)): vol.In(UPDATE_INTERVAL_OPTIONS),
+            vol.Optional(CONF_MINUTELY_UPDATE_INTERVAL, default=user_input.get(CONF_MINUTELY_UPDATE_INTERVAL, 5)): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
             vol.Optional(CONF_NO_UPDATE_AT_NIGHT, default=user_input.get(CONF_NO_UPDATE_AT_NIGHT, False)): bool,
             vol.Optional(CONF_ENABLE_HOURLY, default=user_input.get(CONF_ENABLE_HOURLY, False)): bool,
             vol.Optional(CONF_ENABLE_MINUTELY, default=user_input.get(CONF_ENABLE_MINUTELY, False)): bool,
@@ -398,7 +425,11 @@ class QweatherOptionsFlow(config_entries.OptionsFlow):
                             vol.Required(
                                 CONF_UPDATE_INTERVAL,
                                 default=config_data.get(CONF_UPDATE_INTERVAL, 60)
-                            ): vol.In({10: "10分钟", 20: "20分钟", 30: "30分钟", 60: "60分钟"}),
+                            ): vol.In(UPDATE_INTERVAL_OPTIONS),
+                            vol.Required(
+                                CONF_MINUTELY_UPDATE_INTERVAL,
+                                default=config_data.get(CONF_MINUTELY_UPDATE_INTERVAL, 5)
+                            ): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
                             vol.Required(
                                 CONF_NO_UPDATE_AT_NIGHT,
                                 default=config_data.get(CONF_NO_UPDATE_AT_NIGHT, False)
@@ -439,6 +470,10 @@ class QweatherOptionsFlow(config_entries.OptionsFlow):
                 # 确保是整数
                 user_input[CONF_UPDATE_INTERVAL] = int(user_input[CONF_UPDATE_INTERVAL])
                 _LOGGER.debug(f"保存后的更新间隔值: {user_input[CONF_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_UPDATE_INTERVAL])}")
+            if CONF_MINUTELY_UPDATE_INTERVAL in user_input:
+                _LOGGER.debug(f"保存前的分钟天气更新间隔值: {user_input[CONF_MINUTELY_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_MINUTELY_UPDATE_INTERVAL])}")
+                user_input[CONF_MINUTELY_UPDATE_INTERVAL] = int(user_input[CONF_MINUTELY_UPDATE_INTERVAL])
+                _LOGGER.debug(f"保存后的分钟天气更新间隔值: {user_input[CONF_MINUTELY_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_MINUTELY_UPDATE_INTERVAL])}")
 
             # 保留原始配置中的其他参数
             updated_data = {**self._config}
@@ -482,7 +517,11 @@ class QweatherOptionsFlow(config_entries.OptionsFlow):
                     vol.Required(
                         CONF_UPDATE_INTERVAL,
                         default=config_data.get(CONF_UPDATE_INTERVAL, 60)
-                    ): vol.In({10: "10分钟", 20: "20分钟", 30: "30分钟", 60: "60分钟"}),
+                    ): vol.In(UPDATE_INTERVAL_OPTIONS),
+                    vol.Required(
+                        CONF_MINUTELY_UPDATE_INTERVAL,
+                        default=config_data.get(CONF_MINUTELY_UPDATE_INTERVAL, 5)
+                    ): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
                     vol.Required(
                         CONF_NO_UPDATE_AT_NIGHT,
                         default=config_data.get(CONF_NO_UPDATE_AT_NIGHT, False)

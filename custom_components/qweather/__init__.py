@@ -58,6 +58,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if update_listener:
             update_listener()
             _LOGGER.info(f"已取消定时更新任务: {unique_id}")
+        minutely_update_listener = hass.data[DOMAIN][unique_id].get('minutely_update_listener')
+        if minutely_update_listener:
+            minutely_update_listener()
+            _LOGGER.info(f"已取消分钟天气定时更新任务: {unique_id}")
         
         # 清理hass.data中的数据
         del hass.data[DOMAIN][unique_id]
@@ -85,6 +89,10 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if update_listener:
             update_listener()
             _LOGGER.info(f"已取消定时更新任务: {unique_id}")
+        minutely_update_listener = hass.data[DOMAIN][unique_id].get('minutely_update_listener')
+        if minutely_update_listener:
+            minutely_update_listener()
+            _LOGGER.info(f"已取消分钟天气定时更新任务: {unique_id}")
         
         # 清理hass.data中的数据
         del hass.data[DOMAIN][unique_id]

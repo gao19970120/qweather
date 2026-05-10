@@ -19,6 +19,14 @@
                       "location_mode": " "
                   } 
               },
+              "location": {
+                  "title": "和风天气",
+                  "description": "输入经纬度",
+                  "data": {
+                     "longitude": "经度",
+                     "latitude": "纬度"
+                  }
+              },
               "device": {
                   "title": "和风天气",
                   "description": "选择获取定位设备",
@@ -35,6 +43,7 @@
                   "description": "数据更新周期",
                   "data": {
                   "update_interval_minutes": " ",
+                  "minutely_update_interval_minutes": "分钟天气更新周期",
                   "no_update_at_night": "数据夜间不更新"
                   } 
               },
@@ -55,7 +64,8 @@
         },
         "error": {
             "communication": "Key可能无效，请检查输入值.",
-            "base": "启用分钟天气必须先启用小时天气"
+            "base": "启用分钟天气必须先启用小时天气",
+            "经纬度格式错误": "经纬度格式错误"
         },
         "abort": {
             "single_instance_allowed": "仅允许单个配置.",
@@ -74,6 +84,7 @@
               "name" : "名称（不可重复）",
               "zone_or_device": "选择获取定位设备",
               "update_interval_minutes": "数据更新周期",
+              "minutely_update_interval_minutes": "分钟天气更新周期",
               "no_update_at_night": "数据夜间不更新",
               "enable_hourly": "启用小时天气",
               "enable_warning": "启用天气预警",

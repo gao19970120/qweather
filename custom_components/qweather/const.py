@@ -12,6 +12,7 @@ CONF_API_KEY = "api_key"
 CONF_API_VERSION = "api_version"
 CONF_STARTTIME = "starttime"
 CONF_UPDATE_INTERVAL = "update_interval_minutes"
+CONF_MINUTELY_UPDATE_INTERVAL = "minutely_update_interval_minutes"
 CONF_NO_UPDATE_AT_NIGHT = "no_update_at_night"
 
 # 新增API功能开关

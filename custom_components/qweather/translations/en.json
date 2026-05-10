@@ -15,10 +15,19 @@
                     "api_version": "API version, default: v7",
                     "name" : "Name"
                 }
+            },
+            "location": {
+                "title": "QWeather",
+                "description": "Enter coordinates",
+                "data": {
+                    "longitude": "Longitude",
+                    "latitude": "Latitude"
+                }
             }
         },
         "error": {
-            "communication": "Key may be invalid, please check the input value."
+            "communication": "Key may be invalid, please check the input value.",
+            "经纬度格式错误": "Invalid longitude or latitude"
         },
         "abort": {
             "single_instance_allowed": "Only a single configuration of Colorfulclouds Weather is allowed.",
@@ -30,6 +39,7 @@
             "user":{
                 "data": {
                     "update_interval_minutes": "update interval minutes(5-1440 minutes),default 10 minutes",
+                    "minutely_update_interval_minutes": "minutely weather update interval",
                     "grid_weather": "Use Grid weather",
                     "enable_hourly": "Enable Hourly Weather",
                     "enable_warning": "Enable Weather Warning",
