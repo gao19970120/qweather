@@ -5105,7 +5105,8 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
         align-items: center;
         gap: 6px;
         min-width: 0;
-        color: var(--warning-chip-fg, rgba(248, 252, 255, 0.96));
+        color: var(--warning-chip-subtle, rgba(235, 242, 249, 0.7));
+        opacity: 0.92;
       }
 
       .warning-chip-meta span {
@@ -5116,12 +5117,15 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
         color: var(--warning-chip-fg, rgba(248, 252, 255, 0.94));
         font-size: 14px;
         line-height: 1.15;
+        font-weight: 350;
+        text-wrap: balance;
       }
 
       .warning-chip-subtitle {
         color: var(--warning-chip-subtle, rgba(235, 242, 249, 0.72));
         font-size: 10.5px;
         line-height: 1.25;
+        letter-spacing: 0.01em;
       }
 
       .warning-chip-count {
@@ -5290,8 +5294,38 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
       }
 
       .forecast-card.current-day {
-        background: rgba(255, 255, 255, 0.5);
-        border-color: rgba(255, 255, 255, 0.62);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.06) 44%, rgba(255, 255, 255, 0.02) 100%),
+          var(--weather-glass-soft);
+        border-color: rgba(244, 251, 255, 0.9);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.74),
+          inset 0 12px 26px rgba(255, 255, 255, 0.08),
+          0 12px 24px rgba(8, 31, 52, 0.16);
+        transform: translateY(-1px);
+      }
+
+      .forecast-card.current-day::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 10px;
+        right: 10px;
+        height: 7px;
+        border-radius: 0 0 12px 12px;
+        background: linear-gradient(180deg, rgba(248, 252, 255, 0.95), rgba(214, 241, 255, 0.44) 60%, rgba(214, 241, 255, 0));
+        pointer-events: none;
+        opacity: 0.96;
+      }
+
+      .forecast-card.current-day::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 36%);
+        pointer-events: none;
+        opacity: 0.9;
       }
 
       .forecast-time,
@@ -5895,6 +5929,9 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     this._forecastDragStartX = 0;
     this._forecastDragStartScrollLeft = 0;
     this._forecastDragTarget = null;
+    this._layoutRafId = 0;
+    this._needsCurveDraw = false;
+    this._lastCurveSignature = '';
     this._boundHandleKeydown = this._handleKeydown.bind(this);
     this._boundHandleResize = this._handleResize.bind(this);
   }
@@ -5908,6 +5945,10 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
   disconnectedCallback() {
     window.removeEventListener('keydown', this._boundHandleKeydown);
     window.removeEventListener('resize', this._boundHandleResize);
+    if (this._layoutRafId) {
+      cancelAnimationFrame(this._layoutRafId);
+      this._layoutRafId = 0;
+    }
     super.disconnectedCallback();
   }
 
@@ -5916,25 +5957,33 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     if (changedProperties.has('config') || changedProperties.has('hass') || changedProperties.has('selectedEntityIndex')) {
       this._updateActiveEntity();
     }
-    if (changedProperties.has('forecastMode') || changedProperties.has('entity') || changedProperties.has('hass')) {
-      this.updateComplete.then(() => {
-        requestAnimationFrame(() => {
-          this._syncSegmentIndicators();
-          this._drawForecastCurves();
-        });
-      });
-    }
-    if (changedProperties.has('selectedEntityIndex') || changedProperties.has('forecastMode') || changedProperties.has('config') || changedProperties.has('hass')) {
-      this.updateComplete.then(() => {
-        requestAnimationFrame(() => this._syncSegmentIndicators());
-      });
+    const needsCurveDraw = changedProperties.has('forecastMode') || changedProperties.has('entity') || changedProperties.has('hass');
+    const needsIndicatorSync = needsCurveDraw || changedProperties.has('selectedEntityIndex') || changedProperties.has('config');
+    if (needsIndicatorSync) {
+      this._queueForecastLayout(needsCurveDraw);
     }
   }
 
   _handleResize() {
-    requestAnimationFrame(() => {
-      this._syncSegmentIndicators();
-      this._drawForecastCurves();
+    this._lastCurveSignature = '';
+    this._queueForecastLayout(true);
+  }
+
+  _queueForecastLayout(drawCurves = false) {
+    this._needsCurveDraw = this._needsCurveDraw || drawCurves;
+    if (this._layoutRafId) return;
+    this.updateComplete.then(() => {
+      if (!this.isConnected || this._layoutRafId) return;
+      this._layoutRafId = requestAnimationFrame(() => {
+        this._layoutRafId = 0;
+        if (!this.isConnected) return;
+        const shouldDrawCurves = this._needsCurveDraw;
+        this._needsCurveDraw = false;
+        this._syncSegmentIndicators();
+        if (shouldDrawCurves) {
+          this._drawForecastCurves();
+        }
+      });
     });
   }
 
@@ -6003,6 +6052,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     if (mode === this.forecastMode) return;
     const order = ['daily', 'hourly', 'minutely'];
     this._forecastTransitionDirection = order.indexOf(mode) > order.indexOf(this.forecastMode) ? 'forward' : 'backward';
+    this._lastCurveSignature = '';
     this.forecastMode = mode;
     this.selectedIndexDetail = null;
   }
@@ -6274,24 +6324,44 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     if (!this.shadowRoot || data.length < 2) return;
     const canvas = this.shadowRoot.querySelector('.curve-canvas');
     if (!canvas) return;
-    const cards = [...this.shadowRoot.querySelectorAll('.forecast-card')];
+    const cards = Array.from(this.shadowRoot.querySelectorAll('.forecast-card'));
     if (cards.length < 2) return;
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    const firstRect = cards[0].getBoundingClientRect();
-    const lastRect = cards[cards.length - 1].getBoundingClientRect();
+    const cardRects = cards.map(card => card.getBoundingClientRect());
+    const firstRect = cardRects[0];
+    const lastRect = cardRects[cardRects.length - 1];
     const itemWidth = firstRect.width;
     const totalWidth = Math.max(rect.width, lastRect.left - firstRect.left + itemWidth);
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(totalWidth * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    canvas.style.width = `${totalWidth}px`;
+    const canvasWidth = Math.round(totalWidth * dpr);
+    const canvasHeight = Math.round(rect.height * dpr);
+    const valueSignature = data.map(item => [
+      item.datetime || '',
+      item.native_temperature ?? '',
+      item.native_temp_low ?? ''
+    ].join(':')).join('|');
+    const layoutSignature = cardRects.map(item => `${Math.round(item.left - firstRect.left)},${Math.round(item.width)}`).join('|');
+    const signature = [
+      this.forecastMode,
+      Math.round(totalWidth),
+      Math.round(rect.height),
+      dpr,
+      layoutSignature,
+      valueSignature
+    ].join('::');
+    if (signature === this._lastCurveSignature) return;
+    this._lastCurveSignature = signature;
+    if (canvas.width !== canvasWidth) canvas.width = canvasWidth;
+    if (canvas.height !== canvasHeight) canvas.height = canvasHeight;
+    const canvasCssWidth = `${totalWidth}px`;
+    if (canvas.style.width !== canvasCssWidth) canvas.style.width = canvasCssWidth;
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, totalWidth, rect.height);
     const range = this._getTemperatureRange(data);
     const makePoints = key => data.map((item, index) => ({
-      x: (cards[index].getBoundingClientRect().left - firstRect.left) + (cards[index].getBoundingClientRect().width / 2),
+      x: (cardRects[index].left - firstRect.left) + (cardRects[index].width / 2),
       y: this._tempTop(item[key], range)
     }));
     const draw = (points, color) => {
@@ -6401,7 +6471,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
                       <span>${warning.length ? '天气预警' : '预警状态'}</span>
                     </div>
                     <div class="warning-chip-title">${warning.length ? `${warning[0].title || warning[0].typeName || '预警生效中'}` : '暂无预警'}</div>
-                    <div class="warning-chip-subtitle">${warning.length ? '点击查看详细预警信息' : '当前天气状态稳定'}</div>
+                    <div class="warning-chip-subtitle">${this._getWarningStatusText(warning)}</div>
                   </div>
                   <div class="warning-chip-count">${warning.length ? warning.length : 0}</div>
                 </button>
@@ -6596,6 +6666,12 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
   _getPollutantUnit(value, unit) {
     if (value === undefined || value === null || value === '') return '--';
     return unit || '--';
+  }
+
+  _getWarningStatusText(warnings) {
+    const count = Array.isArray(warnings) ? warnings.length : 0;
+    if (!count) return '当前无生效预警';
+    return `${count} 条预警生效中`;
   }
 
   _getAqiSummaryText(category) {
