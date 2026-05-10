@@ -5661,7 +5661,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
       }
 
       .pollutant-unit {
-        color: var(--aqi-color, #46c878);
+        color: rgba(186, 220, 236, 0.96);
         font-size: 10px;
         font-weight: 350;
       }
@@ -6549,6 +6549,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     const aqiValue = aqi.aqi || aqi.value || fallbackAqi || '--';
     const color = this._getAqiColor(category);
     const progress = this._getAqiProgress(aqiValue);
+    const summaryText = this._getAqiSummaryText(category);
     const pollutants = [
       ['PM2.5', aqi.pm2p5, 'μg/m³'],
       ['PM10', aqi.pm10, 'μg/m³'],
@@ -6569,8 +6570,8 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
         <div>
           <div class="aqi-title" style="color: ${color};">空气质量${category}</div>
           <div class="aqi-subtitle">
-            <strong>空气清新，放心呼吸</strong>
-            <span>等级 ${aqi.level || '--'} · 首要污染物 ${aqi.primary || 'NA'}</span>
+            <strong>${summaryText}</strong>
+            <span>等级 ${aqi.level || '--'} · 首要污染物 ${this._formatPrimaryPollutant(aqi.primary)}</span>
           </div>
         </div>
       </div>
@@ -6580,7 +6581,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
             <div class="pollutant-name">${name}</div>
             <div class="pollutant-value">
               <span>${this._formatValue(value, '')}</span>
-              <span class="pollutant-unit">${unit === 'mg/m³' ? 'mg/m³' : this._getPollutantLevelText(name, value, category)}</span>
+              <span class="pollutant-unit">${this._getPollutantUnit(value, unit)}</span>
             </div>
           </div>
         `)}
@@ -6592,10 +6593,35 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     `;
   }
 
-  _getPollutantLevelText(name, value, category) {
+  _getPollutantUnit(value, unit) {
     if (value === undefined || value === null || value === '') return '--';
-    if (name === 'CO') return 'mg/m³';
-    return category === '优' || category === '良' ? category : 'μg/m³';
+    return unit || '--';
+  }
+
+  _getAqiSummaryText(category) {
+    switch (category) {
+      case '优':
+        return '空气清新，放心呼吸';
+      case '良':
+        return '空气良好，适宜外出';
+      case '轻度污染':
+        return '轻度污染，适当防护';
+      case '中度污染':
+        return '污染加重，减少外出';
+      case '重度污染':
+        return '空气较差，注意防护';
+      case '严重污染':
+        return '污染严重，尽量避免外出';
+      default:
+        return '空气质量待更新';
+    }
+  }
+
+  _formatPrimaryPollutant(value) {
+    if (!value) return 'NA';
+    const normalized = String(value).trim().toUpperCase();
+    if (normalized === 'PM2P5') return 'PM2.5';
+    return normalized;
   }
 
   _renderIndicesPanel(indices) {
