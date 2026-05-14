@@ -6679,7 +6679,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
       case '优':
         return '空气清新，放心呼吸';
       case '良':
-        return '空气良好，适宜外出';
+        return '空气良好，正常出行';
       case '轻度污染':
         return '轻度污染，适当防护';
       case '中度污染':
@@ -6694,8 +6694,9 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
   }
 
   _formatPrimaryPollutant(value) {
-    if (!value) return 'NA';
+    if (!value) return '无';
     const normalized = String(value).trim().toUpperCase();
+    if (normalized === 'NA' || normalized === 'N/A') return '无';
     if (normalized === 'PM2P5') return 'PM2.5';
     return normalized;
   }
