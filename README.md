@@ -13,6 +13,12 @@
   - 负责补回小时预报中的“当前小时”
   - 提供独立前端卡片，不再依赖 `qweather` 内置前端资源
 
+## 效果预览
+
+保留原来的天气大卡效果图：
+
+![new-weather-pad-card 效果图](docs/images/xiaoshi-weather-pad-card-preview.png)
+
 ## 当前结构
 
 ```text
