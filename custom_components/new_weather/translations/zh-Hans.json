@@ -1,0 +1,18 @@
+{
+  "config": {
+    "title": "新晴天气",
+    "step": {
+      "user": {
+        "title": "新晴天气",
+        "description": "选择一个和风天气实体，生成供新版天气卡使用的中转实体。",
+        "data": {
+          "name": "名称",
+          "source_entity": "源天气实体"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "该源天气实体已经配置过。"
+    }
+  }
+}

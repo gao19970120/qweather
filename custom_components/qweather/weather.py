@@ -113,24 +113,22 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         await hass.http.async_register_static_paths([
             StaticPathConfig(ROOT_PATH, hass.config.path('custom_components/qweather/local'), False)
         ])
-        _LOGGER.debug("静态路径注册成功")
     except RuntimeError as e:
-        _LOGGER.debug(f"静态路径已注册，跳过: {str(e)}")
+        pass
     name = config_entry.data.get(CONF_NAME)
     host = config_entry.data.get(CONF_HOST, "api.qweather.com")
     api_key = config_entry.data.get(CONF_API_KEY)
     unique_id = config_entry.unique_id
     
     # 定位设备或搜索城市
-    location_mode = config_entry.data.get("location_mode", "选择设备")
-    zone_or_device = None
-    location = None
+    location_mode = config_entry.data.get("location_mode", "device")  # 默认为定位设备
     
     if location_mode == "城市搜索":
         # 搜索城市模式
         city = config_entry.data.get("城市搜索")
         if not city:
             _LOGGER.debug(f"城市搜索为空，跳过")
+            _LOGGER.info("*************************************************")
             # 创建无搜索城市实体
             no_city_entity = create_no_city_entity(config_entry)
             async_add_entities([no_city_entity], True)
@@ -155,33 +153,23 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         except Exception as e:
             _LOGGER.error(f"获取城市经纬度异常: {str(e)}")
             return
-    elif location_mode == "选择设备":
-        raw_zone_or_device = config_entry.data.get(CONF_ZONE_OR_DEVICE, "")
-        zone_or_device = raw_zone_or_device.split("(")[-1].split(")")[0].strip() if raw_zone_or_device else None
+    else:
+        # 定位设备模式
+        zone_or_device = config_entry.data.get(CONF_ZONE_OR_DEVICE).split("(")[-1].split(")")[0].strip()
         if zone_or_device:
             entity_state = hass.states.get(zone_or_device)
             if entity_state:
                 longitude = entity_state.attributes.get("longitude")
                 latitude = entity_state.attributes.get("latitude")
-                if longitude is not None and latitude is not None:
-                    location = f"{longitude},{latitude}"
-        if not location:
-            _LOGGER.error("选择设备模式未能获取有效经纬度: %s", raw_zone_or_device)
-            return
-    else:
-        location = config_entry.data.get("location")
-        if not location:
-            longitude = config_entry.data.get(CONF_LONGITUDE)
-            latitude = config_entry.data.get(CONF_LATITUDE)
-            if longitude is not None and latitude is not None:
                 location = f"{longitude},{latitude}"
-        if not location:
-            _LOGGER.error("经纬度模式缺少 location 配置")
-            return
+        else:
+            # 使用默认配置的经纬度
+            location = config_entry.data.get("location")
     
     # 优先从data中读取更新间隔值，因为这是用户最新设置的值
     if CONF_UPDATE_INTERVAL in config_entry.data:
         update_interval_minutes = int(config_entry.data.get(CONF_UPDATE_INTERVAL, 30))
+        _LOGGER.info("天气开始更新 #########################################")
         _LOGGER.debug(f"从data中读取的更新间隔时间: {update_interval_minutes} 分钟")
     else:
         # 如果data中没有，则从options中读取
@@ -191,9 +179,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         # 确保是整数
         update_interval_minutes = int(update_interval_minutes)
     if CONF_MINUTELY_UPDATE_INTERVAL in config_entry.data:
-        minutely_update_interval_minutes = int(config_entry.data.get(CONF_MINUTELY_UPDATE_INTERVAL, update_interval_minutes))
+        minutely_update_interval_minutes = int(config_entry.data.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
     else:
-        minutely_update_interval_minutes = int(config_entry.options.get(CONF_MINUTELY_UPDATE_INTERVAL, update_interval_minutes))
+        minutely_update_interval_minutes = int(config_entry.options.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
     starttime = config_entry.options.get(CONF_STARTTIME, 0)
     no_update_at_night = config_entry.options.get(CONF_NO_UPDATE_AT_NIGHT, False)
     _LOGGER.debug(f"从配置中读取的更新间隔时间: {update_interval_minutes} 分钟，分钟天气更新间隔: {minutely_update_interval_minutes} 分钟")
@@ -208,9 +196,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     config[CONF_ENABLE_INDICES] = config_entry.data.get(CONF_ENABLE_INDICES, config_entry.options.get(CONF_ENABLE_INDICES, False))
     config[CONF_ENABLE_MINUTELY] = config_entry.data.get(CONF_ENABLE_MINUTELY, config_entry.options.get(CONF_ENABLE_MINUTELY, False))
 
-    # 记录API功能开关状态，方便调试
-    _LOGGER.debug(f"API功能开关状态: 小时天气={config[CONF_ENABLE_HOURLY]}, 预警={config[CONF_ENABLE_WARNING]}, 空气质量={config[CONF_ENABLE_AIR]}, 昨日天气={config[CONF_ENABLE_YESTERDAY]}, 天气指数={config[CONF_ENABLE_INDICES]}, 分钟预警={config[CONF_ENABLE_MINUTELY]}")
-    
     # 如果是城市搜索模式，将城市名称添加到配置中
     if location_mode == "城市搜索":
         config["城市搜索"] = config_entry.data.get("城市搜索")
@@ -248,7 +233,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 _LOGGER.debug('[%s]夜间时段（22:00-04:00）不更新数据', name)
                 return
         
-        # 正常更新数据
+        # 普通天气刷新不处理分钟天气，分钟天气由独立周期刷新。
         await data.async_update(now, skip_minutely=True)
 
     async def custom_minutely_update(now):
@@ -268,9 +253,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         minutely_update_listener = async_track_time_interval(
             hass,
             custom_minutely_update,
-            timedelta(minutes=minutely_update_interval_minutes)
+            timedelta(minutes=minutely_update_interval_minutes),
         )
-    _LOGGER.debug('[%s]刷新间隔时间: %s 分钟，夜间不更新: %s', name, update_interval_minutes, no_update_at_night)
+    _LOGGER.info('[%s]刷新间隔时间: %s 分钟，分钟天气刷新间隔: %s 分钟，夜间不更新: %s', name, update_interval_minutes, minutely_update_interval_minutes, no_update_at_night)
     
     # 保存定时任务回调到hass.data，供卸载时使用
     hass.data[DOMAIN][unique_id]['update_listener'] = update_listener
@@ -278,7 +263,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     
     if data._current:  # 检查是否有有效数据
         async_add_entities([HeFengWeather(data, unique_id, name)], True)
-        _LOGGER.info(f"成功添加天气实体: {name}")
+        _LOGGER.info(f"[{name}]成功添加天气实体")
+        _LOGGER.info("*************************************************")
     else:
         _LOGGER.error("未能获取有效天气数据，无法创建实体")
 
@@ -567,31 +553,34 @@ class HeFengWeather(WeatherEntity):
         await self.async_update_listeners(None)
       
     async def async_update(self, **kwargs):
-        self._condition = self._data._condition
-        self._condition_cn = self._data._condition_cn
-        self._native_temperature = self._data._native_temperature
-        self._humidity = self._data._humidity
-        self._native_pressure = self._data._native_pressure
-        self._native_wind_speed = self._data._native_wind_speed
-        self._wind_bearing = self._data._wind_bearing
-        self._daily_forecast = self._data._daily_forecast
-        self._hourly_forecast = self._data._hourly_forecast
-        self._daily_twice_forecast = self._data._daily_twice_forecast
-        self._minutely_forecast = self._data._minutely_forecast
-        self._minutely_summary = self._data._minutely_summary
-        self._aqi = self._data._aqi
-        self._winddir = self._data._winddir
-        self._windscale = self._data._windscale
-        self._weather_warning = self._data._weather_warning
-        self._sun_data = self._data._sun_data
-        self._air_indices = self._data._air_indices
-        self._city = self._data._city
-        self._icon = self._data._icon
-        self._feelslike = self._data._feelslike
-        self._cloud = self._data._cloud
-        self._vis = self._data._vis
-        self._dew = self._data._dew
-        self._updatetime = self._data._refreshtime
+        force_update = kwargs.get('force_update', False)
+        if force_update or not hasattr(self, '_last_update') or \
+           (dt_util.now() - self._last_update).total_seconds() > self._data._update_interval_minutes * 60:
+            self._condition = self._data._condition
+            self._condition_cn = self._data._condition_cn
+            self._native_temperature = self._data._native_temperature
+            self._humidity = self._data._humidity
+            self._native_pressure = self._data._native_pressure
+            self._native_wind_speed = self._data._native_wind_speed
+            self._wind_bearing = self._data._wind_bearing
+            self._daily_forecast = self._data._daily_forecast
+            self._hourly_forecast = self._data._hourly_forecast
+            self._daily_twice_forecast = self._data._daily_twice_forecast
+            self._minutely_forecast = self._data._minutely_forecast
+            self._minutely_summary = self._data._minutely_summary
+            self._aqi = self._data._aqi
+            self._winddir = self._data._winddir
+            self._windscale = self._data._windscale
+            self._weather_warning = self._data._weather_warning
+            self._sun_data = self._data._sun_data
+            self._air_indices = self._data._air_indices
+            self._city = self._data._city
+            self._icon = self._data._icon
+            self._feelslike = self._data._feelslike
+            self._cloud = self._data._cloud
+            self._vis = self._data._vis
+            self._dew = self._data._dew
+            self._updatetime = self._data._refreshtime
 
 @dataclass
 class Forecast:
@@ -657,13 +646,6 @@ class MinutelyForecast:
     native_pressure: float = None
     cloud_coverage: int = None
     windscaleday: str = None
-
-
-def _forecast_hour_key(value: str) -> str | None:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %H")
-    except (TypeError, ValueError):
-        return None
 
 class WeatherData(object):
     """天气相关的数据，存储在这个类中."""
@@ -740,136 +722,6 @@ class WeatherData(object):
         self._enable_yesterday = self._config.get(CONF_ENABLE_YESTERDAY, False)
         self._enable_indices = self._config.get(CONF_ENABLE_INDICES, False)
         self._enable_minutely = self._config.get(CONF_ENABLE_MINUTELY, False)
-
-    def _build_current_hour_snapshot(self) -> HourlyForecast | None:
-        if self._native_temperature is None:
-            return None
-        current_hour = dt_util.now().strftime('%Y-%m-%d %H:00')
-        return HourlyForecast(
-            datetime=current_hour,
-            native_temperature=float(self._native_temperature or 0),
-            condition=self._condition,
-            text=self._condition_cn,
-            wind_bearing=float(self._wind_bearing or 0),
-            native_wind_speed=float(self._native_wind_speed or 0),
-            native_precipitation=0.0,
-            humidity=float(self._humidity or 0),
-            probable_precipitation=0,
-            native_pressure=float(self._native_pressure or 0),
-            cloud_coverage=int(self._cloud or 0) if self._cloud is not None else None,
-            windscaleday=str(self._windscale or "0"),
-        )
-
-    def _ensure_current_hour_forecast(self, previous_forecasts=None):
-        current_hour_key = dt_util.now().strftime('%Y-%m-%d %H')
-        if any(_forecast_hour_key(item.datetime) == current_hour_key for item in self._hourly_forecast):
-            return
-
-        preserved = next(
-            (item for item in (previous_forecasts or []) if _forecast_hour_key(item.datetime) == current_hour_key),
-            None
-        )
-        if preserved is None:
-            preserved = self._build_current_hour_snapshot()
-        if preserved is None:
-            return
-
-        self._hourly_forecast.insert(0, preserved)
-
-    def _rebuild_minutely_forecast(self):
-        self._minutely_forecast = []
-        self._minutely_summary = None
-
-        if not self._minutely_data:
-            return
-
-        if isinstance(self._minutely_data, dict):
-            self._minutely_summary = self._minutely_data.get('summary')
-
-        minutely_list = []
-        if isinstance(self._minutely_data, dict) and 'minutely' in self._minutely_data:
-            minutely_list = self._minutely_data['minutely']
-        elif isinstance(self._minutely_data, list):
-            minutely_list = self._minutely_data
-
-        hourly_dict = {}
-        if self._hourly_forecast:
-            for hourly in self._hourly_forecast:
-                key = _forecast_hour_key(hourly.datetime)
-                if key:
-                    hourly_dict[key] = hourly
-
-        default_temperature = self._native_temperature
-        default_humidity = self._humidity
-        default_wind_speed = self._native_wind_speed
-        default_wind_bearing = self._wind_bearing
-        default_pressure = self._native_pressure
-        default_cloud = self._cloud
-        default_wind_scale = self._windscale
-
-        for minutely in minutely_list:
-            try:
-                date_obj = datetime.fromisoformat(minutely.get("fxTime", "").replace('Z', '+00:00'))
-                date_obj = dt_util.as_local(date_obj)
-                time_str = date_obj.strftime('%Y-%m-%d %H:%M')
-                match_key = date_obj.strftime('%Y-%m-%d %H')
-            except ValueError:
-                time_str = "时间格式错误"
-                match_key = None
-
-            temperature = default_temperature
-            humidity = default_humidity
-            wind_speed = default_wind_speed
-            wind_bearing = default_wind_bearing
-            pressure = default_pressure
-            cloud = default_cloud
-            wind_scale = default_wind_scale
-            condition = None
-            text = None
-
-            if match_key and match_key in hourly_dict:
-                hourly_data = hourly_dict[match_key]
-                temperature = hourly_data.native_temperature
-                humidity = hourly_data.humidity
-                wind_speed = hourly_data.native_wind_speed
-                wind_bearing = hourly_data.wind_bearing
-                pressure = hourly_data.native_pressure
-                cloud = hourly_data.cloud_coverage
-                wind_scale = hourly_data.windscaleday
-
-            precip_type = minutely.get("type", "")
-            precip_value = float(minutely.get("precip", 0))
-
-            if precip_value == 0:
-                if match_key and match_key in hourly_dict:
-                    hourly_data = hourly_dict[match_key]
-                    condition = hourly_data.condition
-                    text = hourly_data.text
-                else:
-                    condition = self._condition
-                    text = self._condition_cn
-            else:
-                if precip_type == "rain":
-                    condition = "rainy"
-                    text = "雨"
-                elif precip_type == "snow":
-                    condition = "snowy"
-                    text = "雪"
-
-            self._minutely_forecast.append(MinutelyForecast(
-                datetime=time_str,
-                native_temperature=temperature,
-                condition=condition,
-                text=text,
-                wind_bearing=wind_bearing,
-                native_wind_speed=wind_speed,
-                native_precipitation=float(minutely.get("precip", 0)),
-                humidity=humidity,
-                probable_precipitation=float(minutely.get("precip", 0)),
-                native_pressure=pressure,
-                cloud_coverage=cloud,
-                windscaleday=wind_scale
-            ))
         
     def _update_api_urls(self):
         """更新所有 API URL"""
@@ -882,7 +734,7 @@ class WeatherData(object):
         self.indices_url = f"https://{self._host}/v7/indices/1d?type=0&location={self._location}&lang=zh"
         self.yesterday_url = None  # 将在获取到LocationID后动态设置
         self.minutely_url = f"https://{self._host}/v7/minutely/5m?location={self._location}&lang=zh"
-        _LOGGER.debug(f"API URL 已更新为位置: {self._location}") 
+
     @property
     def name(self):
         """Return the name of the sensor."""
@@ -944,7 +796,6 @@ class WeatherData(object):
                 "o3": str(int(pollutants.get('o3', 0)))
             }
             
-            _LOGGER.debug(f"空气质量数据转换完成: {old_format}")
             return old_format
             
         except Exception as e:
@@ -1062,7 +913,6 @@ class WeatherData(object):
             
     async def async_update(self, now, force_update=False, skip_minutely=False, minutely_only=False):
         """获取天气数据"""
-        _LOGGER.info("获取天气数据")
         # 如果是设备模式，每次更新时重新获取设备的经纬度并更新 API URL 
         if self._zone_or_device:
             entity_state = self.hass.states.get(self._zone_or_device)
@@ -1072,8 +922,7 @@ class WeatherData(object):
                 if longitude is not None and latitude is not None:
                     old_location = self._location
                     self._location = f"{longitude},{latitude}"
-                    _LOGGER.debug(f"更新设备位置: 从 {old_location} 更新为 {self._location}")
-                    
+
                     # 更新所有 API URL
                     self._update_api_urls()
                     
@@ -1116,7 +965,6 @@ class WeatherData(object):
                                         _LOGGER.debug(f"城市位置未变化: {self._location}")
                 except Exception as e:
                     _LOGGER.error(f"获取城市经纬度异常: {str(e)}")
-        _LOGGER.debug(f"设置HTTP连接参数")
         # 设置HTTP连接参数
         timeout = aiohttp.ClientTimeout(total=10)
         connector = aiohttp.TCPConnector(limit=80, force_close=True)
@@ -1148,7 +996,7 @@ class WeatherData(object):
         async def fetch_data(url, update_attr, data_attr, min_interval, json_key=None, force_update=False):
             last_update = getattr(self, update_attr, 0) or 0
             # 检查是否需要更新，如果是强制更新则跳过时间间隔检查
-            _LOGGER.debug(f"上次更新时间: {last_update}, 当前时间: {current_time}, 最小间隔: {min_interval}")
+            
             if not force_update and current_time - last_update < min_interval:
                 _LOGGER.debug(f"跳过更新 {data_attr}：时间间隔不足 ({current_time - last_update} < {min_interval})")
                 return False
@@ -1169,9 +1017,9 @@ class WeatherData(object):
                     
                     # 处理预警API的无数据情况
                     if url == self.warning_url and json_data.get('metadata', {}).get('zeroResult', False):
-                        _LOGGER.debug("预警API返回无数据，设置为空列表")
                         setattr(self, data_attr, None)
                         setattr(self, update_attr, current_time)
+                        _LOGGER.info(f"成功访问API: {url}")
                         return True
                     
                     if json_key:
@@ -1213,29 +1061,22 @@ class WeatherData(object):
                 tasks.append(fetch_data(self.geo_url, '_updatetime_geo', '_geo_data', min_intervals['geo'], 'geo', force_update))
             
             # 根据配置决定是否调用各个API
-            _LOGGER.debug(f"API功能调用前状态: 小时天气={self._enable_hourly}, 预警={self._enable_warning}, 空气质量={self._enable_air}, 昨日天气={self._enable_yesterday}, 天气指数={self._enable_indices}, 分钟预警={self._enable_minutely}")
+            _LOGGER.debug(f"API功能启用状态: 小时天气={self._enable_hourly}, 预警={self._enable_warning}, 空气质量={self._enable_air}, 昨日天气={self._enable_yesterday}, 天气指数={self._enable_indices}, 分钟预警={self._enable_minutely}")
 
             if not minutely_only and self._enable_air:
-                _LOGGER.debug(f"添加空气质量API任务: {self.air_url}")
                 tasks.append(fetch_data(self.air_url, '_updatetime_air', '_air_data', min_intervals['air'], None, force_update))
             if not minutely_only and self._enable_hourly:
-                _LOGGER.debug(f"添加小时天气API任务: {self.hourly_url}")
                 tasks.append(fetch_data(self.hourly_url, '_updatetime_hourly', '_hourly_data', min_intervals['hourly'], 'hourly', force_update))
             if self._enable_minutely and not skip_minutely:
-                _LOGGER.debug(f"添加分钟预警API任务: {self.minutely_url}")
                 tasks.append(fetch_data(self.minutely_url, '_updatetime_minutely', '_minutely_data', min_intervals['minutely'], None, force_update))
             if not minutely_only and self._enable_warning:
-                _LOGGER.debug(f"添加预警API任务: {self.warning_url}")
                 tasks.append(fetch_data(self.warning_url, '_updatetime_warning', '_warning_data', min_intervals['warning'], None, force_update))
-
             if not minutely_only and self._enable_indices:
-                _LOGGER.debug(f"添加天气指数API任务: {self.indices_url}")
                 tasks.append(fetch_data(self.indices_url, '_updatetime_indices', '_air_indices', min_intervals['indices'], 'daily', force_update))
           
             
             # 执行所有任务（除了昨日天气）- 使用 return_exceptions=True 防止单个失败影响整体
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            _LOGGER.debug("API更新结果: %s", results)
             
             # 检查结果中的异常并记录
             for i, result in enumerate(results):
@@ -1260,10 +1101,6 @@ class WeatherData(object):
                     # 如果是超时异常，不更新时间戳以便下次重试
                     if "TimeoutError" in str(type(result)) or "timeout" in str(result).lower():
                         _LOGGER.info(f"API ({api_name}) 超时，下次更新时将重试")
-
-            if minutely_only:
-                self._rebuild_minutely_forecast()
-                return
             
             # 处理geo数据获取LocationID，然后设置昨日天气URL并调用
             if not minutely_only and self._geo_data and isinstance(self._geo_data, dict) and 'location' in self._geo_data and self._geo_data['location']:
@@ -1274,16 +1111,14 @@ class WeatherData(object):
                     yesterday = datetime.now() - timedelta(days=1)
                     self._yesterday = yesterday.strftime("%Y-%m-%d")  # 用于比较的格式
                     self._yesterday_api = yesterday.strftime("%Y%m%d")  # API使用的格式
-                    _LOGGER.debug(f"计算昨日日期: {self._yesterday} (API格式: {self._yesterday_api})")
                     
                     # 使用YYYYMMDD格式供API使用
                     self.yesterday_url = f"https://{self._host}/v7/historical/weather?location={self._location_id}&date={self._yesterday_api}"
-                    _LOGGER.debug(f"设置昨日天气API URL: {self.yesterday_url}")
                     
                     # 昨日天气API总是强制更新，因为日期每天都在变化
                     await fetch_data(self.yesterday_url, '_updatetime_yesterday', '_yesterday_data', min_intervals['yesterday'], None, force_update=True) 
             
-            # 单独处理城市信息 - 任何情况都更新
+            # 单独处理城市信息，分钟独立刷新时沿用已有城市信息。
             if not minutely_only:
                 try:
                     geo_data = self._geo_data  # 使用已经获取的geo数据
@@ -1295,7 +1130,7 @@ class WeatherData(object):
                             self._city = f"{city1}-{city2}"
                         else:
                             self._city = f"{country}-{city2}"
-                        
+
                         _LOGGER.info("[%s]天气所在城市：%s", self._name, self._city)
                     else:
                         self._city = "未知"
@@ -1372,16 +1207,13 @@ class WeatherData(object):
         yesterday_inserted = False
         if self._enable_yesterday:
             # 添加调试日志
-            _LOGGER.debug(f"昨日天气处理: 昨日日期={self._yesterday}, 昨日数据存在={bool(self._yesterday_data)}")
-            
+
             if self._yesterday_data and isinstance(self._yesterday_data, dict) and 'weatherDaily' in self._yesterday_data:
                 yesterday_weather = self._yesterday_data['weatherDaily']
                 yesterday_date = self._yesterday  # 使用计算的昨日日期 YYYY-MM-DD 格式
                 
                 # 检查昨日日期是否在每日数组内
                 has_yesterday = any(daily.get("fxDate", "") == yesterday_date for daily in daily_list)
-                
-                _LOGGER.debug(f"昨日数据检查: 昨日是否在daily_list中={has_yesterday}")
                 
                 # 只有在昨日日期不在每日数组内时才插入
                 if not has_yesterday:
@@ -1428,7 +1260,6 @@ class WeatherData(object):
                     }
                     daily_list.insert(0, yesterday_forecast)
                     yesterday_inserted = True
-                    _LOGGER.info(f"成功插入昨日天气数据: {yesterday_date}")
                 else:
                     _LOGGER.info(f"昨日数据已存在于每日预报中，无需插入: {yesterday_date}")
         else:
@@ -1469,7 +1300,6 @@ class WeatherData(object):
                 ))
         
         # 处理小时预报
-        previous_hourly_forecast = list(self._hourly_forecast or [])
         self._hourly_forecast = []        
         if self._hourly_data:
             hourly_list = self._hourly_data
@@ -1498,10 +1328,115 @@ class WeatherData(object):
                     cloud_coverage=int(hourly.get("cloud", 0)) if hourly.get("cloud") is not None else None,
                     windscaleday=str(hourly.get("windScale", "0")) if hourly.get("windScale") is not None else "0"
                 ))
-        self._ensure_current_hour_forecast(previous_hourly_forecast)
 
         # 处理分钟预报
-        self._rebuild_minutely_forecast()
+        self._minutely_forecast = []
+        self._minutely_summary = None
+
+        if self._minutely_data:
+            # 提取summary字段
+            if isinstance(self._minutely_data, dict):
+                self._minutely_summary = self._minutely_data.get('summary')
+
+            minutely_list = []
+            if isinstance(self._minutely_data, dict) and 'minutely' in self._minutely_data:
+                minutely_list = self._minutely_data['minutely']
+            elif isinstance(self._minutely_data, list):
+                minutely_list = self._minutely_data
+
+            # 创建小时预报的字典，用于快速查找匹配的小时数据
+            # 键格式：年-月-日-小时
+            hourly_dict = {}
+            if self._hourly_forecast:
+                for hourly in self._hourly_forecast:
+                    try:
+                        datetime_parts = hourly.datetime.split(' ')
+                        date_part = datetime_parts[0]  # 年-月-日
+                        time_part = datetime_parts[1].split(':')[0]  # 小时
+                        key = f"{date_part}-{time_part}"
+                        hourly_dict[key] = hourly
+                    except (IndexError, AttributeError):
+                        continue
+
+            # 获取实时天气数据作为默认值
+            default_temperature = self._native_temperature
+            default_humidity = self._humidity
+            default_wind_speed = self._native_wind_speed
+            default_wind_bearing = self._wind_bearing
+            default_pressure = self._native_pressure
+            default_cloud = self._cloud
+            default_wind_scale = self._windscale
+
+            for minutely in minutely_list:
+                try:
+                    date_obj = datetime.fromisoformat(minutely.get("fxTime", "").replace('Z', '+00:00'))
+                    date_obj = dt_util.as_local(date_obj)
+                    time_str = date_obj.strftime('%Y-%m-%d %H:%M')
+                    # 构建匹配键：年-月-日-小时
+                    match_key = date_obj.strftime('%Y-%m-%d-%H')
+                except ValueError:
+                    time_str = "时间格式错误"
+                    match_key = None
+
+                # 从小时预报中获取匹配的数据
+                temperature = default_temperature
+                humidity = default_humidity
+                wind_speed = default_wind_speed
+                wind_bearing = default_wind_bearing
+                pressure = default_pressure
+                cloud = default_cloud
+                wind_scale = default_wind_scale
+                condition = None
+                text = None
+
+                if match_key and match_key in hourly_dict:
+                    hourly_data = hourly_dict[match_key]
+                    temperature = hourly_data.native_temperature
+                    humidity = hourly_data.humidity
+                    wind_speed = hourly_data.native_wind_speed
+                    wind_bearing = hourly_data.wind_bearing
+                    pressure = hourly_data.native_pressure
+                    cloud = hourly_data.cloud_coverage
+                    wind_scale = hourly_data.windscaleday
+ 
+                # 降水类型转换
+                precip_type = minutely.get("type", "")
+                precip_value = float(minutely.get("precip", 0))
+
+                # 当分钟降水为0时，继承小时天气或实时天气数据
+                if precip_value == 0:
+                    if match_key and match_key in hourly_dict:
+                        # 优先继承小时天气数据
+                        hourly_data = hourly_dict[match_key]
+                        condition = hourly_data.condition
+                        text = hourly_data.text
+                    else:
+                        # 没有匹配的小时数据，使用实时天气数据
+                        condition = self._condition
+                        text = self._condition_cn
+                else:
+                    # 有降水时，根据降水类型设置
+                    if precip_type == "rain":
+                        condition = "rainy"
+                        text = "雨"
+                    elif precip_type == "snow":
+                        condition = "snowy"
+                        text = "雪"
+
+                self._minutely_forecast.append(MinutelyForecast(
+                    datetime=time_str,
+                    native_temperature=temperature,
+                    condition=condition,
+                    text=text,
+                    wind_bearing=wind_bearing,
+                    native_wind_speed=wind_speed,
+                    native_precipitation=float(minutely.get("precip", 0)),
+                    humidity=humidity,
+                    probable_precipitation=float(minutely.get("precip", 0)),
+                    native_pressure=pressure,
+                    cloud_coverage=cloud,
+                    windscaleday=wind_scale
+                ))
 
         # 处理白天/夜晚预报
         self._daily_twice_forecast = []
@@ -1555,6 +1490,6 @@ class WeatherData(object):
         if self._responsecode == '402':
             _LOGGER.warning("API请求超过访问次数")
         elif self._responsecode == '200':
-            _LOGGER.info("成功从API获取本地信息")
+            _LOGGER.info("")
         else:
             _LOGGER.warning("请求API错误，未取得数据，可能是API不支持相关类型，尝试关闭格点天气试试。")

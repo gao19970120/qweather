@@ -1,0 +1,18 @@
+{
+  "config": {
+    "title": "New Weather",
+    "step": {
+      "user": {
+        "title": "New Weather",
+        "description": "Create a bridge weather entity from a QWeather weather entity.",
+        "data": {
+          "name": "Name",
+          "source_entity": "Source weather entity"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This source weather entity is already configured."
+    }
+  }
+}

@@ -1,4 +1,16 @@
 {
+    "services": {
+        "update_weather": {
+            "name": "强制更新",
+            "description": "手动强制更新QWeather天气数据",
+            "fields": {
+                "entity_id": {
+                    "name": "天气实体",
+                    "description": "要更新的天气实体ID"
+                }
+            }
+        }
+    },
     "config": {
         "title": "和风天气",
         "step": {
@@ -18,14 +30,6 @@
                   "data": {
                       "location_mode": " "
                   } 
-              },
-              "location": {
-                  "title": "和风天气",
-                  "description": "输入经纬度",
-                  "data": {
-                     "longitude": "经度",
-                     "latitude": "纬度"
-                  }
               },
               "device": {
                   "title": "和风天气",
@@ -64,8 +68,7 @@
         },
         "error": {
             "communication": "Key可能无效，请检查输入值.",
-            "base": "启用分钟天气必须先启用小时天气",
-            "经纬度格式错误": "经纬度格式错误"
+            "base": "启用分钟天气必须先启用小时天气"
         },
         "abort": {
             "single_instance_allowed": "仅允许单个配置.",

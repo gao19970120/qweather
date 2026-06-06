@@ -1,0 +1,12 @@
+{
+  "domain": "new_weather",
+  "name": "新晴天气",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/gao19970120/qweather",
+  "dependencies": ["qweather"],
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "1.0.0",
+  "after_dependencies": ["qweather"]
+}
