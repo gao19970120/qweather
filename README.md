@@ -7,10 +7,11 @@
 - `custom_components/qweather`
   - 和风天气主集成
   - 负责请求官方 API、生成原始 weather 实体
-  - 已恢复“分钟天气独立更新周期”
+  - 已内置“分钟天气独立更新周期”
 - `custom_components/new_weather`
   - 轻量中转集成
   - 负责补回小时预报中的“当前小时”
+  - 自动为每个 `qweather` 天气实体补建桥接 weather 实体
   - 提供独立前端卡片，不再依赖 `qweather` 内置前端资源
 
 ## 效果预览
@@ -58,6 +59,9 @@ custom_components/
   - `custom:new-weather-glance-card`
 - 小时预报增强：
   - 当原始 `hourly_forecast` 从下一个小时开始时，自动补回当前小时
+- 多实体桥接增强：
+  - 会扫描现有 `qweather` 的 `weather.*` 实体
+  - 缺失桥接条目时自动补建对应的 `new_weather_*` 实体
 - 图标资源独立：
   - 卡片图标从 `/new_weather/icon` 加载
   - 后续 `qweather` 更新不会再覆盖卡片资源
@@ -105,6 +109,13 @@ weather.new_weather_wo_jia_de_tian_qi
 ```
 
 后续 Lovelace 卡片建议统一使用这个中转实体。
+
+如果你的 `qweather` 已经有多个天气实体，`new_weather` 在加载时也会自动补齐其它源实体对应的桥接实体，例如：
+
+```text
+weather.shang_hai
+-> weather.new_weather_shang_hai
+```
 
 ## Lovelace 资源
 
@@ -167,6 +178,51 @@ default_entity_index: 0
 - 详细天气弹窗使用 `custom:new-weather-pad-card`
 - 弹窗实体统一绑定 `new_weather` 中转实体
 - 原始 `qweather` 实体只作为上游数据源保留
+
+## 分钟天气补丁
+
+仓库内的 `custom_components/qweather` 已经包含分钟天气独立更新逻辑。  
+如果你已经在 Home Assistant 里安装过别处更新后的 `qweather`，导致分钟天气独立更新被覆盖，可以直接套用仓库里的补丁文件：
+
+- [patches/qweather-6.8-minutely-update.patch](patches/qweather-6.8-minutely-update.patch)
+
+### 补丁适用场景
+
+- 你 HA 里的 `custom_components/qweather` 被上游新版覆盖
+- 你不想重新手工比对 `config_flow.py / weather.py / const.py`
+- 你只想把“分钟天气独立更新周期”快速补回
+
+### 推荐做法
+
+优先推荐直接用本仓库里的整套 `custom_components/qweather` 覆盖到 HA。  
+如果你只想修补现有安装目录，再使用 patch。
+
+### `git apply` 用法
+
+在 Home Assistant 配置目录执行，补丁路径替换为你本地实际保存的位置：
+
+```bash
+git apply /path/to/qweather/patches/qweather-6.8-minutely-update.patch
+```
+
+Windows 示例：
+
+```powershell
+git apply "D:\trea\天气\qweather\patches\qweather-6.8-minutely-update.patch"
+```
+
+### 手工补丁范围
+
+这个 patch 主要修改：
+
+- `custom_components/qweather/const.py`
+- `custom_components/qweather/config_flow.py`
+- `custom_components/qweather/weather.py`
+- `custom_components/qweather/__init__.py`
+- `custom_components/qweather/translations/en.json`
+- `custom_components/qweather/translations/zh-Hans.json`
+
+补丁恢复后，分钟天气会拥有独立的刷新周期，不再跟普通天气更新周期绑定。
 
 ## 迁移说明
 

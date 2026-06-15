@@ -1,0 +1,535 @@
+--- a/custom_components/qweather/__init__.py
++++ b/custom_components/qweather/__init__.py
+@@ -39,6 +39,10 @@
+         if update_listener:
+             update_listener()
+             _LOGGER.info(f"已取消定时更新任务: {unique_id}")
++        minutely_update_listener = hass.data[DOMAIN][unique_id].get('minutely_update_listener')
++        if minutely_update_listener:
++            minutely_update_listener()
++            _LOGGER.info(f"已取消分钟天气定时更新任务: {unique_id}")
+ 
+         # 清理hass.data中的数据
+         del hass.data[DOMAIN][unique_id]
+@@ -67,6 +71,10 @@
+         if update_listener:
+             update_listener()
+             _LOGGER.info(f"已取消定时更新任务: {unique_id}")
++        minutely_update_listener = hass.data[DOMAIN][unique_id].get('minutely_update_listener')
++        if minutely_update_listener:
++            minutely_update_listener()
++            _LOGGER.info(f"已取消分钟天气定时更新任务: {unique_id}")
+         
+         # 清理hass.data中的数据
+         del hass.data[DOMAIN][unique_id]
+
+--- a/custom_components/qweather/config_flow.py
++++ b/custom_components/qweather/config_flow.py
+@@ -18,6 +18,7 @@
+     CONF_ZONE_OR_DEVICE,
+     CONF_STARTTIME,
+     CONF_UPDATE_INTERVAL,
++    CONF_MINUTELY_UPDATE_INTERVAL,
+     CONF_NO_UPDATE_AT_NIGHT,
+     CONF_ENABLE_HOURLY,
+     CONF_ENABLE_WARNING,
+@@ -29,6 +30,16 @@
+ import voluptuous as vol
+ 
+ _LOGGER = logging.getLogger(__name__)
++
++MINUTELY_UPDATE_INTERVAL_OPTIONS = {
++    "5": "5分钟",
++    "10": "10分钟",
++    "15": "15分钟",
++    "20": "20分钟",
++    "30": "30分钟",
++    "45": "45分钟",
++    "60": "1小时",
++}
+ 
+ @config_entries.HANDLERS.register(DOMAIN)
+ 
+@@ -237,6 +248,8 @@
+             # 保存更新周期设置，确保转为整数
+             if CONF_UPDATE_INTERVAL in user_input:
+                 user_input[CONF_UPDATE_INTERVAL] = int(user_input[CONF_UPDATE_INTERVAL])
++            if CONF_MINUTELY_UPDATE_INTERVAL in user_input:
++                user_input[CONF_MINUTELY_UPDATE_INTERVAL] = int(user_input[CONF_MINUTELY_UPDATE_INTERVAL])
+             self.user_input.update(user_input)
+             
+             # 进入第5步：API功能选择
+@@ -277,9 +290,13 @@
+         current_interval = str(user_input.get(CONF_UPDATE_INTERVAL, 60))
+         if current_interval not in UPDATE_INTERVAL_OPTIONS:
+             current_interval = "60"
++        current_minutely_interval = str(user_input.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
++        if current_minutely_interval not in MINUTELY_UPDATE_INTERVAL_OPTIONS:
++            current_minutely_interval = "5"
+ 
+         data_schema = vol.Schema({
+             vol.Required(CONF_UPDATE_INTERVAL, default=current_interval): vol.In(UPDATE_INTERVAL_OPTIONS),
++            vol.Required(CONF_MINUTELY_UPDATE_INTERVAL, default=current_minutely_interval): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
+             vol.Required(CONF_NO_UPDATE_AT_NIGHT, default=user_input.get(CONF_NO_UPDATE_AT_NIGHT, False)): bool
+         })
+ 
+@@ -363,6 +380,9 @@
+         saved_interval = str(user_input.get(CONF_UPDATE_INTERVAL, 60))
+         if saved_interval not in UPDATE_INTERVAL_OPTIONS:
+             saved_interval = "60"
++        saved_minutely_interval = str(user_input.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
++        if saved_minutely_interval not in MINUTELY_UPDATE_INTERVAL_OPTIONS:
++            saved_minutely_interval = "5"
+ 
+         data_schema = vol.Schema({
+             vol.Required(CONF_NAME, default=default_name): str,
+@@ -374,6 +394,7 @@
+             vol.Optional("城市搜索", default=user_input.get("城市搜索", "")): str,
+         }).extend({
+             vol.Optional(CONF_UPDATE_INTERVAL, default=saved_interval): vol.In(UPDATE_INTERVAL_OPTIONS),
++            vol.Optional(CONF_MINUTELY_UPDATE_INTERVAL, default=saved_minutely_interval): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
+             vol.Optional(CONF_NO_UPDATE_AT_NIGHT, default=user_input.get(CONF_NO_UPDATE_AT_NIGHT, False)): bool,
+             vol.Optional(CONF_ENABLE_HOURLY, default=user_input.get(CONF_ENABLE_HOURLY, False)): bool,
+             vol.Optional(CONF_ENABLE_MINUTELY, default=user_input.get(CONF_ENABLE_MINUTELY, False)): bool,
+@@ -390,151 +411,58 @@
+         )
+     
+     async def async_step_user(self, user_input=None):
+-        # 修改集成的配置选项
+-        if user_input is not None:
+-            # 验证：启用分钟预警必须启用小时预警
++        UPDATE_INTERVAL_OPTIONS = {"10": "10分钟", "20": "20分钟", "30": "30分钟", "60": "60分钟", "99999": "99999分钟"}
++
++        if user_input is not None:
+             if user_input.get(CONF_ENABLE_MINUTELY) and not user_input.get(CONF_ENABLE_HOURLY):
+                 self._errors["base"] = "启用分钟预警必须先启用小时预警"
+-                config_data = {**self._config}
+-                config_data.update(self._config_entry.options)
+-                UPDATE_INTERVAL_OPTIONS = {"10": "10分钟", "20": "20分钟", "30": "30分钟", "60": "60分钟", "99999": "99999分钟"}
+-                saved_interval = str(config_data.get(CONF_UPDATE_INTERVAL, 60))
+-                if saved_interval not in UPDATE_INTERVAL_OPTIONS:
+-                    saved_interval = "60"
+-                return self.async_show_form(
+-                    step_id="user",
+-                    data_schema=vol.Schema(
+-                        {
+-                            vol.Required(
+-                                CONF_API_KEY,
+-                                default=config_data.get(CONF_API_KEY, "")
+-                            ): str,
+-                            vol.Required(
+-                                CONF_HOST,
+-                                default=config_data.get(CONF_HOST, "api.qweather.com")
+-                            ): str,
+-                        vol.Required(
+-                            CONF_UPDATE_INTERVAL,
+-                            default=saved_interval
+-                        ): vol.In(UPDATE_INTERVAL_OPTIONS),
+-                            vol.Required(
+-                                CONF_NO_UPDATE_AT_NIGHT,
+-                                default=config_data.get(CONF_NO_UPDATE_AT_NIGHT, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_HOURLY,
+-                                default=config_data.get(CONF_ENABLE_HOURLY, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_MINUTELY,
+-                                default=config_data.get(CONF_ENABLE_MINUTELY, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_WARNING,
+-                                default=config_data.get(CONF_ENABLE_WARNING, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_AIR,
+-                                default=config_data.get(CONF_ENABLE_AIR, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_YESTERDAY,
+-                                default=config_data.get(CONF_ENABLE_YESTERDAY, False)
+-                            ): bool,
+-                            vol.Required(
+-                                CONF_ENABLE_INDICES,
+-                                default=config_data.get(CONF_ENABLE_INDICES, False)
+-                            ): bool,
+-                        }
+-                    ),
+-                    errors=self._errors,
+-                )
+-
+-            # 确保更新间隔时间正确保存为整数值
+-            if CONF_UPDATE_INTERVAL in user_input:
+-                # 记录原始值和类型
+-                _LOGGER.debug(f"保存前的更新间隔值: {user_input[CONF_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_UPDATE_INTERVAL])}")
+-                # 确保是整数
+-                user_input[CONF_UPDATE_INTERVAL] = int(user_input[CONF_UPDATE_INTERVAL])
+-                _LOGGER.debug(f"保存后的更新间隔值: {user_input[CONF_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_UPDATE_INTERVAL])}")
+-
+-            # 保留原始配置中的其他参数
+-            updated_data = {**self._config}
+-            # 更新用户修改的参数
+-            updated_data.update(user_input)
+-            # 记录日志
+-            _LOGGER.debug(f"更新后的配置: {updated_data}")
+-
+-            # 更新配置条目的data
+-            self.hass.config_entries.async_update_entry(
+-                self._config_entry,
+-                data=updated_data
+-            )
+-            _LOGGER.info(f"已更新配置条目的data: {updated_data}")
+-
+-            # 返回更新后的配置
+-            return self.async_create_entry(title="", data=updated_data)
+-
+-        # 获取之前的配置值，优先使用data，然后使用options
++            else:
++                if CONF_UPDATE_INTERVAL in user_input:
++                    _LOGGER.debug(f"保存前的更新间隔值: {user_input[CONF_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_UPDATE_INTERVAL])}")
++                    user_input[CONF_UPDATE_INTERVAL] = int(user_input[CONF_UPDATE_INTERVAL])
++                    _LOGGER.debug(f"保存后的更新间隔值: {user_input[CONF_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_UPDATE_INTERVAL])}")
++                if CONF_MINUTELY_UPDATE_INTERVAL in user_input:
++                    _LOGGER.debug(f"保存前的分钟天气更新间隔值: {user_input[CONF_MINUTELY_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_MINUTELY_UPDATE_INTERVAL])}")
++                    user_input[CONF_MINUTELY_UPDATE_INTERVAL] = int(user_input[CONF_MINUTELY_UPDATE_INTERVAL])
++                    _LOGGER.debug(f"保存后的分钟天气更新间隔值: {user_input[CONF_MINUTELY_UPDATE_INTERVAL]}, 类型: {type(user_input[CONF_MINUTELY_UPDATE_INTERVAL])}")
++
++                updated_data = {**self._config}
++                updated_data.update(user_input)
++                _LOGGER.debug(f"更新后的配置: {updated_data}")
++                self.hass.config_entries.async_update_entry(self._config_entry, data=updated_data)
++                _LOGGER.info(f"已更新配置条目的data: {updated_data}")
++                return self.async_create_entry(title="", data=updated_data)
++
+         config_data = {**self._config}
+         config_data.update(self._config_entry.options)
+-        
+-        # 确保更新周期能正确回显
+-        UPDATE_INTERVAL_OPTIONS = {"10": "10分钟", "20": "20分钟", "30": "30分钟", "60": "60分钟", "99999": "99999分钟"}
++
+         saved_interval = str(config_data.get(CONF_UPDATE_INTERVAL, 60))
+         if saved_interval not in UPDATE_INTERVAL_OPTIONS:
+             saved_interval = "60"
+-        
+-        # 记录当前配置状态，用于调试
++        saved_minutely_interval = str(config_data.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
++        if saved_minutely_interval not in MINUTELY_UPDATE_INTERVAL_OPTIONS:
++            saved_minutely_interval = "5"
++
+         _LOGGER.debug(f"Options Flow 当前配置: {config_data}")
+         _LOGGER.debug(f"原始data: {self._config}")
+         _LOGGER.debug(f"options: {self._config_entry.options}")
+-        
+-        # 显示所有配置参数
++
+         return self.async_show_form(
+             step_id="user",
+             data_schema=vol.Schema(
+                 {
+-                    vol.Required(
+-                        CONF_API_KEY,
+-                        default=config_data.get(CONF_API_KEY, "")
+-                    ): str,
+-                    vol.Required(
+-                        CONF_HOST,
+-                        default=config_data.get(CONF_HOST, "api.qweather.com")
+-                    ): str,
+-                    vol.Required(
+-                        CONF_UPDATE_INTERVAL,
+-                        default=saved_interval
+-                    ): vol.In(UPDATE_INTERVAL_OPTIONS),
+-                    vol.Required(
+-                        CONF_NO_UPDATE_AT_NIGHT,
+-                        default=config_data.get(CONF_NO_UPDATE_AT_NIGHT, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_HOURLY,
+-                        default=config_data.get(CONF_ENABLE_HOURLY, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_MINUTELY,
+-                        default=config_data.get(CONF_ENABLE_MINUTELY, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_WARNING,
+-                        default=config_data.get(CONF_ENABLE_WARNING, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_AIR,
+-                        default=config_data.get(CONF_ENABLE_AIR, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_YESTERDAY,
+-                        default=config_data.get(CONF_ENABLE_YESTERDAY, False)
+-                    ): bool,
+-                    vol.Required(
+-                        CONF_ENABLE_INDICES,
+-                        default=config_data.get(CONF_ENABLE_INDICES, False)
+-                    ): bool,
++                    vol.Required(CONF_API_KEY, default=config_data.get(CONF_API_KEY, "")): str,
++                    vol.Required(CONF_HOST, default=config_data.get(CONF_HOST, "api.qweather.com")): str,
++                    vol.Required(CONF_UPDATE_INTERVAL, default=saved_interval): vol.In(UPDATE_INTERVAL_OPTIONS),
++                    vol.Required(CONF_MINUTELY_UPDATE_INTERVAL, default=saved_minutely_interval): vol.In(MINUTELY_UPDATE_INTERVAL_OPTIONS),
++                    vol.Required(CONF_NO_UPDATE_AT_NIGHT, default=config_data.get(CONF_NO_UPDATE_AT_NIGHT, False)): bool,
++                    vol.Required(CONF_ENABLE_HOURLY, default=config_data.get(CONF_ENABLE_HOURLY, False)): bool,
++                    vol.Required(CONF_ENABLE_MINUTELY, default=config_data.get(CONF_ENABLE_MINUTELY, False)): bool,
++                    vol.Required(CONF_ENABLE_WARNING, default=config_data.get(CONF_ENABLE_WARNING, False)): bool,
++                    vol.Required(CONF_ENABLE_AIR, default=config_data.get(CONF_ENABLE_AIR, False)): bool,
++                    vol.Required(CONF_ENABLE_YESTERDAY, default=config_data.get(CONF_ENABLE_YESTERDAY, False)): bool,
++                    vol.Required(CONF_ENABLE_INDICES, default=config_data.get(CONF_ENABLE_INDICES, False)): bool,
+                 }
+-            )
+-        )
++            ),
++            errors=self._errors,
++        )
+
+--- a/custom_components/qweather/const.py
++++ b/custom_components/qweather/const.py
+@@ -12,6 +12,7 @@
+ CONF_API_VERSION = "api_version"
+ CONF_STARTTIME = "starttime"
+ CONF_UPDATE_INTERVAL = "update_interval_minutes"
++CONF_MINUTELY_UPDATE_INTERVAL = "minutely_update_interval_minutes"
+ CONF_NO_UPDATE_AT_NIGHT = "no_update_at_night"
+ 
+ # 新增API功能开关
+
+--- a/custom_components/qweather/weather.py
++++ b/custom_components/qweather/weather.py
+@@ -73,6 +73,7 @@
+     DOMAIN,
+     CONF_STARTTIME,
+     CONF_UPDATE_INTERVAL,
++    CONF_MINUTELY_UPDATE_INTERVAL,
+     CONF_ZONE_OR_DEVICE,
+     CONF_NO_UPDATE_AT_NIGHT,
+     CONF_ENABLE_HOURLY,
+@@ -177,9 +178,13 @@
+         _LOGGER.debug(f"配置中的更新间隔原始值: {update_interval_minutes}, 类型: {type(update_interval_minutes)}")
+         # 确保是整数
+         update_interval_minutes = int(update_interval_minutes)
++    if CONF_MINUTELY_UPDATE_INTERVAL in config_entry.data:
++        minutely_update_interval_minutes = int(config_entry.data.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
++    else:
++        minutely_update_interval_minutes = int(config_entry.options.get(CONF_MINUTELY_UPDATE_INTERVAL, 5))
+     starttime = config_entry.options.get(CONF_STARTTIME, 0)
+     no_update_at_night = config_entry.options.get(CONF_NO_UPDATE_AT_NIGHT, False)
+-    _LOGGER.debug(f"从配置中读取的更新间隔时间: {update_interval_minutes} 分钟")
++    _LOGGER.debug(f"从配置中读取的更新间隔时间: {update_interval_minutes} 分钟，分钟天气更新间隔: {minutely_update_interval_minutes} 分钟")
+     config = {}
+     config[CONF_API_KEY] = api_key
+     
+@@ -202,8 +207,21 @@
+     if unique_id not in hass.data[DOMAIN]:
+         hass.data[DOMAIN][unique_id] = {}
+     hass.data[DOMAIN][unique_id]['update_interval'] = update_interval_minutes
+-
+-    data = WeatherData(hass, name, unique_id, host, config, api_key, location, starttime, zone_or_device if location_mode == "选择设备" else None, update_interval_minutes)
++    hass.data[DOMAIN][unique_id]['minutely_update_interval'] = minutely_update_interval_minutes
++
++    data = WeatherData(
++        hass,
++        name,
++        unique_id,
++        host,
++        config,
++        api_key,
++        location,
++        starttime,
++        zone_or_device if location_mode == "选择设备" else None,
++        update_interval_minutes,
++        minutely_update_interval_minutes,
++    )
+     await data.async_update(dt_util.now())
+     
+     # 创建自定义更新函数，处理夜间不更新的逻辑
+@@ -215,15 +233,33 @@
+                 _LOGGER.debug('[%s]夜间时段（22:00-04:00）不更新数据', name)
+                 return
+         
+-        # 正常更新数据
+-        await data.async_update(now)
++        # 普通天气刷新不处理分钟天气，分钟天气由独立周期刷新
++        await data.async_update(now, skip_minutely=True)
++
++    async def custom_minutely_update(now):
++        if not config.get(CONF_ENABLE_MINUTELY, False):
++            return
++        if no_update_at_night:
++            current_hour = now.hour
++            if 22 <= current_hour or current_hour < 4:
++                _LOGGER.debug('[%s]夜间时段（22:00-04:00）不更新分钟天气数据', name)
++                return
++        await data.async_update(now, minutely_only=True)
+     
+     # 注册定时更新并保存回调对象，以便卸载时取消
+     update_listener = async_track_time_interval(hass, custom_update, timedelta(minutes=update_interval_minutes))
+-    _LOGGER.info('[%s]刷新间隔时间: %s 分钟，夜间不更新: %s', name, update_interval_minutes, no_update_at_night)
++    minutely_update_listener = None
++    if config.get(CONF_ENABLE_MINUTELY, False):
++        minutely_update_listener = async_track_time_interval(
++            hass,
++            custom_minutely_update,
++            timedelta(minutes=minutely_update_interval_minutes),
++        )
++    _LOGGER.info('[%s]刷新间隔时间: %s 分钟，分钟天气刷新间隔: %s 分钟，夜间不更新: %s', name, update_interval_minutes, minutely_update_interval_minutes, no_update_at_night)
+     
+     # 保存定时任务回调到hass.data，供卸载时使用
+     hass.data[DOMAIN][unique_id]['update_listener'] = update_listener
++    hass.data[DOMAIN][unique_id]['minutely_update_listener'] = minutely_update_listener
+     
+     if data._current:  # 检查是否有有效数据
+         async_add_entities([HeFengWeather(data, unique_id, name)], True)
+@@ -613,7 +649,7 @@
+ 
+ class WeatherData(object):
+     """天气相关的数据，存储在这个类中."""
+-    def __init__(self, hass, name, unique_id, host, config, usetoken, location , starttime, zone_or_device=None, update_interval_minutes=60):
++    def __init__(self, hass, name, unique_id, host, config, usetoken, location , starttime, zone_or_device=None, update_interval_minutes=60, minutely_update_interval_minutes=None):
+         super().__init__()
+         """初始化函数."""
+         self.hass = hass
+@@ -654,6 +690,7 @@
+         self._warning_data: list[dict] = []
+         self._air_data = []
+         self._update_interval_minutes = update_interval_minutes
++        self._minutely_update_interval_minutes = minutely_update_interval_minutes or update_interval_minutes
+         self._sun_data = {} 
+         self._air_indices = {}
+         self._yesterday_data = {}
+@@ -874,7 +911,7 @@
+         else:
+             return False
+             
+-    async def async_update(self, now, force_update=False):
++    async def async_update(self, now, force_update=False, skip_minutely=False, minutely_only=False):
+         """获取天气数据"""
+         # 如果是设备模式，每次更新时重新获取设备的经纬度并更新 API URL 
+         if self._zone_or_device:
+@@ -942,7 +979,7 @@
+             'geo': self._update_interval_minutes * 60,
+             'indices': self._update_interval_minutes * 60,
+             'yesterday': self._update_interval_minutes * 60,
+-            'minutely': self._update_interval_minutes * 60,
++            'minutely': self._minutely_update_interval_minutes * 60,
+         }
+          
+         if self._responsecode == '402':
+@@ -1018,22 +1055,23 @@
+             headers=self.headers
+         ) as session:
+             tasks = []
+-            tasks.append(fetch_data(self.now_url, '_updatetime_now', '_current', min_intervals['now'], 'now', force_update))
+-            tasks.append(fetch_data(self.daily_url, '_updatetime_daily', '_daily_data', min_intervals['daily'], 'daily', force_update))
+-            tasks.append(fetch_data(self.geo_url, '_updatetime_geo', '_geo_data', min_intervals['geo'], 'geo', force_update))
++            if not minutely_only:
++                tasks.append(fetch_data(self.now_url, '_updatetime_now', '_current', min_intervals['now'], 'now', force_update))
++                tasks.append(fetch_data(self.daily_url, '_updatetime_daily', '_daily_data', min_intervals['daily'], 'daily', force_update))
++                tasks.append(fetch_data(self.geo_url, '_updatetime_geo', '_geo_data', min_intervals['geo'], 'geo', force_update))
+             
+             # 根据配置决定是否调用各个API
+             _LOGGER.debug(f"API功能启用状态: 小时天气={self._enable_hourly}, 预警={self._enable_warning}, 空气质量={self._enable_air}, 昨日天气={self._enable_yesterday}, 天气指数={self._enable_indices}, 分钟预警={self._enable_minutely}")
+ 
+-            if self._enable_air:
++            if not minutely_only and self._enable_air:
+                 tasks.append(fetch_data(self.air_url, '_updatetime_air', '_air_data', min_intervals['air'], None, force_update))
+-            if self._enable_hourly:
++            if not minutely_only and self._enable_hourly:
+                 tasks.append(fetch_data(self.hourly_url, '_updatetime_hourly', '_hourly_data', min_intervals['hourly'], 'hourly', force_update))
+-            if self._enable_minutely:
++            if self._enable_minutely and not skip_minutely:
+                 tasks.append(fetch_data(self.minutely_url, '_updatetime_minutely', '_minutely_data', min_intervals['minutely'], None, force_update))
+-            if self._enable_warning:
++            if not minutely_only and self._enable_warning:
+                 tasks.append(fetch_data(self.warning_url, '_updatetime_warning', '_warning_data', min_intervals['warning'], None, force_update))
+-            if self._enable_indices:
++            if not minutely_only and self._enable_indices:
+                 tasks.append(fetch_data(self.indices_url, '_updatetime_indices', '_air_indices', min_intervals['indices'], 'daily', force_update))
+           
+             
+@@ -1044,16 +1082,18 @@
+             for i, result in enumerate(results):
+                 if isinstance(result, Exception):
+                     # 根据任务索引确定是哪个API失败了
+-                    api_names = ["now", "daily", "geo"]
+-                    if self._enable_air:
++                    api_names = []
++                    if not minutely_only:
++                        api_names.extend(["now", "daily", "geo"])
++                    if not minutely_only and self._enable_air:
+                         api_names.append("air")
+-                    if self._enable_hourly:
++                    if not minutely_only and self._enable_hourly:
+                         api_names.append("hourly")
+-                    if self._enable_minutely:
++                    if self._enable_minutely and not skip_minutely:
+                         api_names.append("minutely")
+-                    if self._enable_warning:
++                    if not minutely_only and self._enable_warning:
+                         api_names.append("warning")
+-                    if self._enable_indices:
++                    if not minutely_only and self._enable_indices:
+                         api_names.append("indices")
+                     api_name = api_names[i] if i < len(api_names) else f"task_{i}"
+                     _LOGGER.warning(f"API请求失败 ({api_name}): {str(result)}")
+@@ -1063,7 +1103,7 @@
+                         _LOGGER.info(f"API ({api_name}) 超时，下次更新时将重试")
+             
+             # 处理geo数据获取LocationID，然后设置昨日天气URL并调用
+-            if self._geo_data and isinstance(self._geo_data, dict) and 'location' in self._geo_data and self._geo_data['location']:
++            if not minutely_only and self._geo_data and isinstance(self._geo_data, dict) and 'location' in self._geo_data and self._geo_data['location']:
+                 # 提取LocationID用于昨日天气API
+                 self._location_id = self._geo_data['location'][0].get("id")
+                 if self._location_id and self._enable_yesterday:
+@@ -1078,8 +1118,8 @@
+                     # 昨日天气API总是强制更新，因为日期每天都在变化
+                     await fetch_data(self.yesterday_url, '_updatetime_yesterday', '_yesterday_data', min_intervals['yesterday'], None, force_update=True) 
+             
+-            # 单独处理城市信息 - 任何情况都更新
+-            if True:  # 原条件: if not self._city:
++            # 单独处理城市信息，分钟独立刷新时沿用已有城市信息
++            if not minutely_only:
+                 try:
+                     geo_data = self._geo_data  # 使用已经获取的geo数据
+                     if geo_data and 'location' in geo_data and geo_data['location']:
+
+--- a/custom_components/qweather/translations/en.json
++++ b/custom_components/qweather/translations/en.json
+@@ -25,7 +25,8 @@
+                     "key_id": "key id",
+                     "private_key": "private key",
+                     "api_version": "API version, default: v7",
+-                    "name" : "Name"
++                    "name" : "Name",
++                    "minutely_update_interval_minutes": "Minutely weather update interval"
+                 }
+             }
+         },
+@@ -42,6 +43,7 @@
+             "user":{
+                 "data": {
+                     "update_interval_minutes": "update interval minutes(5-1440 minutes),default 10 minutes",
++                    "minutely_update_interval_minutes": "Minutely weather update interval",
+                     "grid_weather": "Use Grid weather",
+                     "enable_hourly": "Enable Hourly Weather",
+                     "enable_warning": "Enable Weather Warning",
+
+--- a/custom_components/qweather/translations/zh-Hans.json
++++ b/custom_components/qweather/translations/zh-Hans.json
+@@ -47,6 +47,7 @@
+                   "description": "数据更新周期",
+                   "data": {
+                   "update_interval_minutes": " ",
++                  "minutely_update_interval_minutes": "分钟天气更新周期",
+                   "no_update_at_night": "数据夜间不更新"
+                   } 
+               },
+@@ -86,6 +87,7 @@
+               "name" : "名称（不可重复）",
+               "zone_or_device": "选择获取定位设备",
+               "update_interval_minutes": "数据更新周期",
++              "minutely_update_interval_minutes": "分钟天气更新周期",
+               "no_update_at_night": "数据夜间不更新",
+               "enable_hourly": "启用小时天气",
+               "enable_warning": "启用天气预警",

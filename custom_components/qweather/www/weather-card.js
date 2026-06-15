@@ -334,7 +334,9 @@ class XiaoshiWeatherPhoneEditor extends LitElement {
     }, 0);
   }
 }
-customElements.define('xiaoshi-weather-phone-editor', XiaoshiWeatherPhoneEditor);
+if (!customElements.get('xiaoshi-weather-phone-editor')) {
+  customElements.define('xiaoshi-weather-phone-editor', XiaoshiWeatherPhoneEditor);
+}
 
 class XiaoshiWeatherPhoneCard extends LitElement {
   // 温度计算常量
@@ -2754,7 +2756,9 @@ class XiaoshiWeatherPhoneCard extends LitElement {
     return 8;
   }
 }
-customElements.define('xiaoshi-weather-phone-card', XiaoshiWeatherPhoneCard);
+if (!customElements.get('xiaoshi-weather-phone-card')) {
+  customElements.define('xiaoshi-weather-phone-card', XiaoshiWeatherPhoneCard);
+}
 
 class XiaoshiWeatherPadEditor extends LitElement {
   static get properties() {
@@ -3107,7 +3111,9 @@ class XiaoshiWeatherPadEditor extends LitElement {
     }, 0);
   }
 }
-customElements.define('xiaoshi-weather-pad-editor', XiaoshiWeatherPadEditor);
+if (!customElements.get('xiaoshi-weather-pad-editor')) {
+  customElements.define('xiaoshi-weather-pad-editor', XiaoshiWeatherPadEditor);
+}
 
 class XiaoshiWeatherPadCard extends LitElement {
   // 温度计算常量
@@ -4776,7 +4782,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
 
       .weather-shell {
         position: relative;
-        width: var(--weather-card-width, min(calc(96vw - 6px), 1254px));
+        width: var(--weather-card-width, min(calc(100vw - 48px), 1254px));
         margin: 0 auto;
         overflow: hidden;
         border-radius: 28px;
@@ -6415,7 +6421,7 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     };
 
     return html`
-      <div class="weather-shell ${dark ? 'dark' : ''}" style="${configuredWidth ? `--weather-card-width: min(${configuredWidth}px, calc(94vw - 6px));` : ''}">
+      <div class="weather-shell ${dark ? 'dark' : ''}" style="${configuredWidth ? `--weather-card-width: min(${configuredWidth}px, calc(100vw - 48px));` : ''}">
         <div class="weather-layout">
           <main class="weather-main">
             ${this._renderEntitySwitcher(entities)}
@@ -6832,7 +6838,9 @@ class XiaoshiWeatherPadCardV2 extends XiaoshiWeatherPadCard {
     this._defaultIndexApplied = false;
   }
 }
-customElements.define('xiaoshi-weather-pad-card', XiaoshiWeatherPadCardV2);
+if (!customElements.get('xiaoshi-weather-pad-card')) {
+  customElements.define('xiaoshi-weather-pad-card', XiaoshiWeatherPadCardV2);
+}
 
 class XiaoshiHourlyWeatherCard extends LitElement {
   static get properties() {
@@ -8393,7 +8401,9 @@ class XiaoshiHourlyWeatherCard extends LitElement {
     });
   }
 }
-customElements.define('xiaoshi-hourly-weather-card', XiaoshiHourlyWeatherCard);
+if (!customElements.get('xiaoshi-hourly-weather-card')) {
+  customElements.define('xiaoshi-hourly-weather-card', XiaoshiHourlyWeatherCard);
+}
 
 class XiaoshiWarningWeatherCard extends LitElement {
   static get properties() {
@@ -8807,7 +8817,9 @@ class XiaoshiWarningWeatherCard extends LitElement {
   }
 
 }
-customElements.define('xiaoshi-warning-weather-card', XiaoshiWarningWeatherCard);
+if (!customElements.get('xiaoshi-warning-weather-card')) {
+  customElements.define('xiaoshi-warning-weather-card', XiaoshiWarningWeatherCard);
+}
 
 class XiaoshiAqiWeatherCard extends LitElement {
   static get properties() {
@@ -9120,7 +9132,9 @@ class XiaoshiAqiWeatherCard extends LitElement {
     return 3;
   }
 }
-customElements.define('xiaoshi-aqi-weather-card', XiaoshiAqiWeatherCard);
+if (!customElements.get('xiaoshi-aqi-weather-card')) {
+  customElements.define('xiaoshi-aqi-weather-card', XiaoshiAqiWeatherCard);
+}
 
 class XiaoshiIndicesWeatherCard extends LitElement {
   static get properties() {
@@ -9367,10 +9381,331 @@ class XiaoshiIndicesWeatherCard extends LitElement {
     return 4;
   }
 }
-customElements.define('xiaoshi-indices-weather-card', XiaoshiIndicesWeatherCard);
+if (!customElements.get('xiaoshi-indices-weather-card')) {
+  customElements.define('xiaoshi-indices-weather-card', XiaoshiIndicesWeatherCard);
+}
+
+class QWeatherGlanceCard extends LitElement {
+  static get properties() {
+    return {
+      hass: { type: Object },
+      config: { type: Object }
+    };
+  }
+
+  static get styles() {
+    return css`
+      :host {
+        display: block;
+        position: relative;
+        width: 100%;
+        height: clamp(96px, 8vw, 132px);
+        min-height: 0;
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+
+      .glance-shell {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        overflow: visible;
+      }
+
+      clock-weather-card {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+      }
+
+      .warning-line {
+        position: absolute;
+        left: var(--warning-center-x, 75%);
+        bottom: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: max-content;
+        max-width: 44%;
+        transform: translateX(-50%);
+        color: var(--warning-color, rgba(235, 241, 248, 0.52));
+        font-family: inherit;
+        font-size: clamp(11px, 0.86vw, 13px);
+        line-height: 1.05;
+        font-weight: 350;
+        letter-spacing: 0;
+        white-space: nowrap;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
+        text-shadow: 0 1px 5px rgba(0, 0, 0, 0.46);
+        pointer-events: none;
+      }
+    `;
+  }
+
+  setConfig(config) {
+    if (!config || !config.entity) {
+      throw new Error('qweather-glance-card 需要指定天气实体');
+    }
+    this.config = {
+      sun_entity: 'sun.sun',
+      weather_icon_type: 'line',
+      animated_icon: true,
+      show_warning: true,
+      show_no_warning: true,
+      hide_clock: true,
+      hide_date: true,
+      hide_forecast_section: true,
+      locale: 'zh-CN',
+      date_pattern: 'DDDD',
+      ...config
+    };
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    if (!customElements.get('clock-weather-card')) {
+      customElements.whenDefined('clock-weather-card').then(() => this.requestUpdate());
+    }
+  }
+
+  updated() {
+    this._syncClockWeatherCard();
+  }
+
+  _syncClockWeatherCard() {
+    const clockCard = this.shadowRoot?.querySelector('clock-weather-card');
+    if (!clockCard || !this.hass || !this.config) return;
+
+    const childConfig = {
+      ...this.config,
+      type: 'custom:clock-weather-card',
+      hide_clock: this.config.hide_clock !== undefined ? this.config.hide_clock : true,
+      hide_date: this.config.hide_date !== undefined ? this.config.hide_date : true,
+      hide_forecast_section: true,
+      sun_entity: this.config.sun_entity || 'sun.sun',
+      weather_icon_type: this.config.weather_icon_type || 'line',
+      animated_icon: this.config.animated_icon !== false,
+      locale: this.config.locale || 'zh-CN',
+      date_pattern: this.config.date_pattern || 'DDDD'
+    };
+
+    if (!clockCard._qweatherConfigApplied || JSON.stringify(clockCard._qweatherConfigApplied) !== JSON.stringify(childConfig)) {
+      try {
+        clockCard.setConfig(childConfig);
+        clockCard._qweatherConfigApplied = childConfig;
+      } catch (err) {
+        console.error('[qweather-glance-card] clock-weather-card 配置失败:', err);
+      }
+    }
+
+    clockCard.hass = this.hass;
+    this._injectClockWeatherStyle(clockCard);
+    this._overrideConditionText(clockCard);
+    this._positionWarningLine(clockCard);
+  }
+
+  _getDisplayCondition() {
+    const entity = this.hass?.states?.[this.config?.entity];
+    const attrs = entity?.attributes || {};
+    const condition = attrs.condition_cn || attrs.condition_text || attrs.text;
+    if (condition) return condition;
+
+    const state = entity?.state || '';
+    const fallback = {
+      'clear-night': '晴',
+      sunny: '晴',
+      partlycloudy: '多云',
+      cloudy: '阴',
+      fog: '雾',
+      rainy: '雨',
+      pouring: '大雨',
+      lightning: '雷',
+      'lightning-rainy': '雷雨',
+      snowy: '雪',
+      'snowy-rainy': '雨夹雪',
+      windy: '风',
+      'windy-variant': '大风',
+      hail: '冰雹'
+    };
+    return fallback[state] || state || '未知';
+  }
+
+  _overrideConditionText(clockCard) {
+    requestAnimationFrame(() => {
+      const conditionLine = clockCard?.shadowRoot?.querySelector('clock-weather-card-today-right-wrap-top, .clock-weather-card-today-right-wrap-top');
+      if (!conditionLine) return;
+      const condition = this._getDisplayCondition();
+      if (conditionLine.textContent.trim() !== condition) {
+        conditionLine.textContent = condition;
+      }
+    });
+  }
+
+  _positionWarningLine(clockCard) {
+    requestAnimationFrame(() => {
+      const centerLine = clockCard?.shadowRoot?.querySelector('clock-weather-card-today-right-wrap-center, .clock-weather-card-today-right-wrap-center');
+      const warningLine = this.shadowRoot?.querySelector('.warning-line');
+      if (!centerLine || !warningLine) return;
+
+      const hostRect = this.getBoundingClientRect();
+      const centerRect = centerLine.getBoundingClientRect();
+      if (!hostRect.width || !centerRect.width) return;
+
+      const centerX = centerRect.left + centerRect.width / 2 - hostRect.left;
+      warningLine.style.setProperty('--warning-center-x', `${centerX}px`);
+    });
+  }
+
+  _injectClockWeatherStyle(clockCard) {
+    const root = clockCard.shadowRoot;
+    if (!root || root.querySelector('#qweather-glance-clock-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'qweather-glance-clock-style';
+    style.textContent = `
+      :host,
+      ha-card {
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+      }
+
+      clock-weather-card-today-right-wrap-top,
+      .clock-weather-card-today-right-wrap-top {
+        font-size: 1.2rem !important;
+        line-height: 1.05 !important;
+        font-family: inherit !important;
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      clock-weather-card-today-right-wrap-center,
+      .clock-weather-card-today-right-wrap-center {
+        display: block !important;
+        height: auto !important;
+        min-height: 0 !important;
+        font-size: 2rem !important;
+        line-height: 1 !important;
+        font-family: inherit !important;
+        font-weight: 380 !important;
+        font-variant-numeric: tabular-nums !important;
+        font-feature-settings: "tnum" !important;
+        letter-spacing: 0 !important;
+        white-space: nowrap !important;
+        text-align: center !important;
+        margin: 0.18rem 0 0 0 !important;
+        padding: 0 !important;
+      }
+    `;
+    root.appendChild(style);
+  }
+
+  _getWarnings() {
+    const entity = this.hass?.states?.[this.config?.entity];
+    const warnings = entity?.attributes?.warning;
+    return Array.isArray(warnings) ? warnings : [];
+  }
+
+  _getWarningLevel(warnings) {
+    if (!Array.isArray(warnings) || warnings.length === 0) return '';
+    const order = { 红: 5, 红色: 5, 橙: 4, 橙色: 4, 黄: 3, 黄色: 3, 蓝: 2, 蓝色: 2 };
+    let best = '';
+    let bestScore = 0;
+    warnings.forEach(item => {
+      const raw = `${item?.level || ''}${item?.severityColor || ''}${item?.severity || ''}`;
+      let score = 1;
+      let level = item?.level || item?.severityColor || '';
+      if (raw.includes('红')) {
+        score = 5;
+        level = '红';
+      } else if (raw.includes('橙')) {
+        score = 4;
+        level = '橙';
+      } else if (raw.includes('黄')) {
+        score = 3;
+        level = '黄';
+      } else if (raw.includes('蓝')) {
+        score = 2;
+        level = '蓝';
+      } else if (order[level]) {
+        score = order[level];
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = level;
+      }
+    });
+    return best;
+  }
+
+  _getWarningColor(level, count) {
+    if (!count) return 'rgba(235, 241, 248, 0.52)';
+    const text = `${level || ''}`;
+    if (text.includes('红')) return 'rgba(255, 82, 82, 0.96)';
+    if (text.includes('橙')) return 'rgba(255, 138, 54, 0.96)';
+    if (text.includes('黄')) return 'rgba(255, 214, 86, 0.96)';
+    if (text.includes('蓝')) return 'rgba(91, 172, 255, 0.96)';
+    return 'rgba(190, 198, 208, 0.82)';
+  }
+
+  _renderWarningLine() {
+    if (!this.config?.show_warning) return html``;
+    const warnings = this._getWarnings();
+    const count = warnings.length;
+    if (!count && this.config.show_no_warning === false) return html``;
+
+    const level = this._getWarningLevel(warnings);
+    const color = this._getWarningColor(level, count);
+    const text = count ? `天气预警 ${count}` : '暂无预警';
+    return html`
+      <div class="warning-line" style="--warning-color: ${color};">
+        <span>${text}</span>
+      </div>
+    `;
+  }
+
+  render() {
+    if (!this.config) return html``;
+    if (!customElements.get('clock-weather-card')) {
+      return html`<div class="glance-shell">${this._renderWarningLine()}</div>`;
+    }
+
+    return html`
+      <div class="glance-shell">
+        <clock-weather-card></clock-weather-card>
+        ${this._renderWarningLine()}
+      </div>
+    `;
+  }
+
+  getCardSize() {
+    return 3;
+  }
+}
+
+if (!customElements.get('qweather-glance-card')) {
+  customElements.define('qweather-glance-card', QWeatherGlanceCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push(
+  {
+    type: "qweather-glance-card",
+    name: "和风天气外层概览卡",
+    preview: true
+  },
   {
     type: "xiaoshi-weather-phone-card",
     name: "消逝天气卡片（手机端）",

@@ -9,3 +9,7 @@ bak/
 *.db
 *.db-shm
 *.db-wal
+
+patches/**/original/
+patches/**/original-tree/
+patches/**/modified-tree/
